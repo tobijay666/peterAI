@@ -1,0 +1,46 @@
+{
+  "rules": [
+    {
+      "id": "block_path_traversal",
+      "severity": "block",
+      "applies_to": ["tool_call"],
+      "pattern": "(\\.\\.[\\/\\\\]|%2e%2e)",
+      "description": "Rejects directory traversal sequences (../ or ..\\)"
+    },
+    {
+      "id": "block_system_prompt_leak",
+      "severity": "block",
+      "applies_to": ["input", "output"],
+      "pattern": "(?i)(ignore previous instructions|reveal (your|the) system prompt|print your prompt)",
+      "description": "Rejects attempts to extract system prompts or jailbreak instructions"
+    },
+    {
+      "id": "block_secret_extraction",
+      "severity": "block",
+      "applies_to": ["tool_call", "output"],
+      "pattern": "(?i)(\\.(env|pem|key|crt)|id_rsa|\\.ssh|\\.aws|\\.azure|Chrome\\\\User Data|Firefox\\\\Profiles)",
+      "description": "Rejects access to environment secrets, private keys, SSH keys, or browser profiles"
+    },
+    {
+      "id": "block_mass_destruction",
+      "severity": "block",
+      "applies_to": ["input", "tool_call"],
+      "pattern": "(?i)(shutil\\.rmtree|rm -rf|del\\s+\\/f|format\\s+[c-z]:|drop database|truncate table)",
+      "description": "Rejects mass destruction commands"
+    },
+    {
+      "id": "block_sensitive_directories",
+      "severity": "block",
+      "applies_to": ["tool_call"],
+      "pattern": "(?i)^([a-z]:\\\\[windows|program files|system32]|\\/etc\\/|\\/usr\\/|\\/var\\/)",
+      "description": "Rejects access to OS system directories"
+    },
+    {
+      "id": "max_file_size",
+      "severity": "warn",
+      "applies_to": ["tool_call"],
+      "pattern": "^.{500000,}$",
+      "description": "Warns on file contents larger than 500k characters"
+    }
+  ]
+}

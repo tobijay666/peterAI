@@ -1,0 +1,24 @@
+vector_store:
+  backend: "chroma"
+  persist_directory: "data/chroma"
+  embedding_model: "all-MiniLM-L6-v2"
+  namespaces:
+    - "peter"
+    - "researcher"
+    - "filesystem"
+    - "librarian"
+    - "devops"
+    - "qa"
+    - "voice"
+
+graph_store:
+  backend: "sqlite"
+  database_path: "data/peter_graph.db"
+  wal_mode: true
+
+eviction:
+  mode: "decay"
+  max_age_days: 30
+  min_access_count: 2
+  importance_threshold: 0.3
+  check_interval_hours: 24
