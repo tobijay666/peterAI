@@ -2,6 +2,14 @@
 
 Peter is a locally-executing, multi-agent AI assistant harness designed for Sir Anton. It coordinates a fleet of specialist agents (**Researcher**, **FileSystem**, **Librarian**, **DevOps**, **QA**, **Voice**) orchestrated by a central conversational front-end named **Peter**.
 
+## How to Work in the REPO:
+1. Create a branch for your self or for a given ISSUE. 
+2. Once the update or the fix has been provided the work can be published as a PR, to the "working" Branch.
+3. The "Main" branch is not to be tampered with until the "working" branch is 100% working.
+4. Peter will be deployed through the main branch. 
+5. in case of a dire situation please don't do anything. 
+
+
 ## Architecture & Features
 
 - **Conversational REPL**: Peter greets and interacts respectfully ("Sir" / "Mr. Anton").
