@@ -25,6 +25,7 @@ class BaseProvider(ABC):
         self.priority = priority
         self.api_key = os.getenv(api_key_env, "")
         self.client: Optional[openai.OpenAI] = None
+        self.last_rate_limits: Dict[str, Any] = {}
         self._init_client()
 
     def _init_client(self) -> None:
@@ -57,6 +58,34 @@ class BaseProvider(ABC):
             logger.debug(f"Health probe failed for {self.name}:{model}: {e}")
             return False
 
+    def _extract_rate_limits(self, headers: Dict[str, str]) -> Dict[str, Any]:
+        """Extracts standard rate limit headers (Groq, OpenAI, etc.)."""
+        rl = {}
+        header_map = {
+            "x-ratelimit-limit-requests": "limit_requests",
+            "x-ratelimit-limit-tokens": "limit_tokens",
+            "x-ratelimit-remaining-requests": "remaining_requests",
+            "x-ratelimit-remaining-tokens": "remaining_tokens",
+            "x-ratelimit-reset-requests": "reset_requests",
+            "x-ratelimit-reset-tokens": "reset_tokens",
+            "retry-after": "retry_after",
+        }
+        for h_key, r_key in header_map.items():
+            val = headers.get(h_key) or headers.get(h_key.lower())
+            if val is not None:
+                rl[r_key] = val
+
+        if rl:
+            self.last_rate_limits = rl
+            rem_req = rl.get("remaining_requests")
+            rem_tok = rl.get("remaining_tokens")
+            if rem_req and str(rem_req).isdigit() and int(rem_req) < 10:
+                logger.warning(f"[{self.name}] Low remaining requests: {rem_req}")
+            if rem_tok and str(rem_tok).isdigit() and int(rem_tok) < 1000:
+                logger.warning(f"[{self.name}] Low remaining tokens: {rem_tok}")
+
+        return rl
+
     def complete(
         self,
         messages: List[Message],
@@ -83,10 +112,20 @@ class BaseProvider(ABC):
                 if tools:
                     kwargs["tools"] = tools
 
-                response = self.client.chat.completions.create(**kwargs)
-                choice = response.choices[0]
+                headers = {}
+                if hasattr(self.client.chat.completions, "with_raw_response"):
+                    try:
+                        raw_res = self.client.chat.completions.with_raw_response.create(**kwargs)
+                        response = raw_res.parse()
+                        headers = dict(raw_res.headers)
+                    except Exception:
+                        response = self.client.chat.completions.create(**kwargs)
+                else:
+                    response = self.client.chat.completions.create(**kwargs)
 
-                # Convert response to dictionary structure
+                rate_limits = self._extract_rate_limits(headers)
+
+                choice = response.choices[0]
                 msg_obj = choice.message
                 tool_calls_dict = None
                 if msg_obj.tool_calls:
@@ -105,6 +144,7 @@ class BaseProvider(ABC):
                     "content": msg_obj.content or "",
                     "role": msg_obj.role,
                     "tool_calls": tool_calls_dict,
+                    "rate_limits": rate_limits,
                     "usage": {
                         "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
                         "completion_tokens": response.usage.completion_tokens if response.usage else 0,
