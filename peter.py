@@ -4,6 +4,7 @@ Peter AI — Locally-Executing Multi-Agent Assistant Harness
 Entry Point: python peter.py
 """
 
+import os
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
@@ -24,6 +25,7 @@ from core.guardrails import GuardrailManager
 from core.interfaces import ToolResult
 from core.logger import logger, setup_logger
 from engine.loop import REPLEngine
+from engine.task_queue import TaskQueue, TaskWorkerPool
 from llm.router import LLMRouter
 from memory.eviction import EvictionScheduler
 from memory.graph_store import GraphMemory
@@ -74,6 +76,19 @@ def bootstrap_system():
         {
             "name": "read_file",
             "description": "Reads text content from a file.",
+            "parameters": {
+                "type": "object",
+                "properties": {"file_path": {"type": "string"}},
+                "required": ["file_path"],
+            },
+        },
+    )
+    registry.register(
+        "read_pdf",
+        fs_tools.read_pdf,
+        {
+            "name": "read_pdf",
+            "description": "Reads and extracts text from a PDF file.",
             "parameters": {
                 "type": "object",
                 "properties": {"file_path": {"type": "string"}},
@@ -405,24 +420,34 @@ def bootstrap_system():
     # 7. Instantiate Peter Orchestrator
     peter = PeterAgent(router, vector_store, graph_store, guardrails, registry, specialists=specialists)
 
-    # 8. Eviction Scheduler
+    # 8. Async Task Queue & Worker Pool
+    num_workers = int(os.getenv("NUM_TASK_WORKERS", "2"))
+    task_queue = TaskQueue()
+    worker_pool = TaskWorkerPool(task_queue=task_queue, specialists=specialists, num_workers=num_workers)
+    peter.set_task_queue(task_queue)
+    worker_pool.start()
+    logger.info(f"[Bootstrap] TaskWorkerPool started with {num_workers} worker(s).")
+
+    # 9. Eviction Scheduler
     eviction_scheduler = EvictionScheduler(vector_store, graph_store)
     eviction_scheduler.start()
 
     logger.info("Peter AI bootstrap complete.")
-    return peter, tts_service, guardrails, eviction_scheduler
+    return peter, tts_service, guardrails, eviction_scheduler, worker_pool, router
 
 
 def main():
     try:
-        peter, tts_service, guardrails, eviction_scheduler = bootstrap_system()
-        repl = REPLEngine(peter, tts_service, guardrails)
+        peter, tts_service, guardrails, eviction_scheduler, worker_pool, router = bootstrap_system()
+        repl = REPLEngine(peter, tts_service, guardrails, worker_pool=worker_pool, router=router)
         repl.start()
     except Exception as e:
         logger.critical(f"Fatal system crash during bootstrap or REPL execution: {e}", exc_info=True)
         sys.exit(1)
     finally:
         logger.info("Cleaning up background workers...")
+        if 'worker_pool' in dir():
+            worker_pool.stop()
 
 
 if __name__ == "__main__":

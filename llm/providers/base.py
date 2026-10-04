@@ -15,7 +15,14 @@ class ProviderError(Exception):
 
 
 class BaseProvider(ABC):
-    """Abstract base class for OpenAI-compatible API providers."""
+    """Abstract base class for OpenAI-compatible API providers.
+
+    Key improvements over v1:
+    - Per-session model blacklist: failed models are skipped immediately on
+      subsequent steps, rather than waiting for the 10-minute health prober.
+    - Hard per-request timeout (COMPLETION_TIMEOUT_SEC, default 90s) to
+      prevent indefinite hangs on stalled provider connections.
+    """
 
     def __init__(self, name: str, base_url: str, api_key_env: str, models: List[str], priority: int = 10):
         self.name = name
@@ -26,6 +33,11 @@ class BaseProvider(ABC):
         self.api_key = os.getenv(api_key_env, "")
         self.client: Optional[openai.OpenAI] = None
         self.last_rate_limits: Dict[str, Any] = {}
+        # Per-session model blacklist: models that failed during the current run.
+        # Updated immediately on failure so the NEXT step skips the dead model,
+        # instead of waiting for the 10-minute background health probe cycle.
+        self._failed_models: set = set()
+        self._completion_timeout: float = float(os.getenv("COMPLETION_TIMEOUT_SEC", "90"))
         self._init_client()
 
     def _init_client(self) -> None:
@@ -39,8 +51,23 @@ class BaseProvider(ABC):
             self.client = None
 
     def is_available(self) -> bool:
-        """Returns True if the API key is configured."""
+        """Returns True if the API key is configured and client is initialized."""
         return bool(self.api_key and self.client)
+
+    def mark_model_failed(self, model: str) -> None:
+        """Immediately blacklists a model for the duration of this session.
+
+        Called internally after any completion failure. The health prober
+        calls clear_failed_models() once a re-probe succeeds, allowing
+        re-admission.
+        """
+        if model not in self._failed_models:
+            self._failed_models.add(model)
+            logger.warning(f"[{self.name}] Model '{model}' blacklisted for this session after failure.")
+
+    def clear_failed_models(self) -> None:
+        """Clears the session blacklist (called by health prober on successful re-probe)."""
+        self._failed_models.clear()
 
     def probe(self, model: str, timeout: float = 8.0) -> bool:
         """Health check probe using a 1-token ping."""
@@ -53,7 +80,11 @@ class BaseProvider(ABC):
                 max_tokens=1,
                 timeout=timeout,
             )
-            return bool(res.choices and len(res.choices) > 0)
+            if res.choices and len(res.choices) > 0:
+                # Successful probe — remove from blacklist so it can be used again
+                self._failed_models.discard(model)
+                return True
+            return False
         except Exception as e:
             logger.debug(f"Health probe failed for {self.name}:{model}: {e}")
             return False
@@ -93,7 +124,12 @@ class BaseProvider(ABC):
         temperature: float = 0.7,
         max_tokens: int = 2048,
     ) -> Dict[str, Any]:
-        """Iterates through provider's model ladder to perform completion."""
+        """Iterates through provider's model ladder to perform completion.
+
+        Blacklisted models are skipped immediately.
+        Each request enforces COMPLETION_TIMEOUT_SEC (default 90s) to prevent
+        indefinite hangs on stalled provider connections.
+        """
         if not self.is_available():
             raise ProviderError(f"Provider {self.name} is missing API key ({self.api_key_env}).")
 
@@ -101,6 +137,11 @@ class BaseProvider(ABC):
         last_exception = None
 
         for model in self.models:
+            # Skip models that already failed this session — no waiting
+            if model in self._failed_models:
+                logger.debug(f"[{self.name}] Skipping blacklisted model '{model}'.")
+                continue
+
             try:
                 logger.debug(f"Attempting completion via {self.name} with model {model}...")
                 kwargs: Dict[str, Any] = {
@@ -108,6 +149,7 @@ class BaseProvider(ABC):
                     "messages": formatted_msgs,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
+                    "timeout": self._completion_timeout,  # Hard timeout — prevents 27-min hangs
                 }
                 if tools:
                     kwargs["tools"] = tools
@@ -155,8 +197,11 @@ class BaseProvider(ABC):
                 }
                 logger.info(f"Completion successful from {self.name}:{model}")
                 return result
+
             except Exception as e:
                 logger.warning(f"Model {model} failed on provider {self.name}: {e}")
+                # Immediately blacklist so the NEXT step skips this model
+                self.mark_model_failed(model)
                 last_exception = e
                 continue
 

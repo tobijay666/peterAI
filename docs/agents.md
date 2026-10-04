@@ -16,7 +16,7 @@
 - **Role**: File and directory manipulation within safe security boundaries.
 - **Read Scope**: Default `D:\` (plus `FS_READ_ALLOWLIST`).
 - **Write Scope**: Strictly `D:\Peter_Workspace\` (or `./workspace`).
-- **Primary Tools**: `list_directory`, `read_file`, `write_file`, `create_directory`, `search_files`.
+- **Primary Tools**: `list_directory`, `read_file`, `read_pdf`, `write_file`, `create_directory`, `search_files`.
 
 ## 4. Librarian Agent
 - **Namespace**: `librarian`

@@ -33,7 +33,7 @@ class FileSystemAgent(BaseAgent):
             name="FileSystem",
             system_prompt=system_prompt,
             policy=["nvidia", "groq", "openrouter", "huggingface"],
-            tool_names=["list_directory", "read_file", "write_file", "create_directory", "search_files", "memory_store"],
+            tool_names=["list_directory", "read_file", "read_pdf", "write_file", "create_directory", "search_files", "memory_store"],
             max_steps=20,
             router=router,
             vector=vector,

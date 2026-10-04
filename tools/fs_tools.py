@@ -125,6 +125,38 @@ def read_file(file_path: str, max_chars: int = 100000) -> ToolResult:
         return ToolResult(success=False, output="", error=str(e))
 
 
+def read_pdf(file_path: str, max_chars: int = 100000) -> ToolResult:
+    try:
+        import pypdf
+        target = _resolve_read_path(file_path)
+        if not target.exists() or not target.is_file():
+            return ToolResult(success=False, output="", error=f"File '{file_path}' does not exist.")
+        
+        if target.suffix.lower() != '.pdf':
+            return ToolResult(success=False, output="", error=f"File '{file_path}' is not a .pdf file.")
+
+        text_content = []
+        with open(target, "rb") as f:
+            reader = pypdf.PdfReader(f)
+            for page in reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    text_content.append(extracted)
+                
+        content = "\n\n".join(text_content)
+        if len(content) > max_chars:
+            content = content[:max_chars] + f"\n... [Truncated at {max_chars} chars]"
+
+        _audit_log("read_pdf", str(target), True)
+        return ToolResult(success=True, output=content or "No text could be extracted from PDF.")
+    except ImportError:
+        _audit_log("read_pdf", file_path, False, "pypdf not installed")
+        return ToolResult(success=False, output="", error="pypdf is required to read PDFs. Install it via pip install pypdf")
+    except Exception as e:
+        _audit_log("read_pdf", file_path, False, str(e))
+        return ToolResult(success=False, output="", error=str(e))
+
+
 def write_file(file_path: str, content: str) -> ToolResult:
     try:
         target = _resolve_write_path(file_path)
