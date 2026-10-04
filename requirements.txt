@@ -10,3 +10,4 @@ duckduckgo-search>=4.4.0
 requests>=2.31.0
 pytest>=8.0.0
 hypothesis>=6.98.0
+pypdf>=4.0.0

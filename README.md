@@ -55,8 +55,28 @@ python peter.py
 ```
 
 ## Running Tests
+The test suite verifies core guardrails, tool execution logic, and end-to-end asynchronous agent workflows to ensure system reliability and security.
+
+To verify each test module separately, you can run the following commands:
+
+**1. Unit Tests:** Validates core functions, filesystem security boundaries, memory store pinning, and agent logic.
 ```bash
-pytest tests/unit tests/integration -v
+python -m pytest tests/unit -v
+```
+
+**2. Property Tests:** Fuzzes the system's security guardrails against edge cases using Hypothesis to guarantee stability.
+```bash
+python -m pytest tests/property -v
+```
+
+**3. Integration Tests:** Simulates end-to-end asynchronous task decomposition, background worker execution, and system compilation.
+```bash
+python -m pytest tests/integration -v
+```
+
+**Run Full Test Suite:**
+```bash
+python -m pytest tests/unit tests/property tests/integration -v
 ```
 
 ## Developer Documentation
