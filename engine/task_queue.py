@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Dict, Optional
 from core.events import event_bus
 from core.interfaces import TaskPlan, TaskStatus
 from core.logger import logger
+from core.clock import Clock, SystemClock
 from engine import task_store
 
 if TYPE_CHECKING:
@@ -50,7 +51,7 @@ class TaskQueue:
     def enqueue(self, task_id: str, step_id: int, priority: int = 0) -> None:
         with self._lock:
             self._active.setdefault(task_id, set()).add(step_id)
-        self._q.put((priority, time.time(), task_id, step_id))
+        self._q.put((priority, SystemClock().now(), task_id, step_id))
         logger.debug(f"[TaskQueue] Enqueued step {step_id} for task '{task_id}' (priority={priority}).")
 
     def dequeue(self, timeout: float = 1.0):
@@ -93,7 +94,9 @@ class TaskWorkerPool:
         task_queue: TaskQueue,
         specialists: Dict[str, "BaseAgent"],
         num_workers: int = DEFAULT_WORKERS,
+        clock: Optional[Clock] = None,
     ) -> None:
+        self._clock = clock or SystemClock()
         self._queue = task_queue
         self._specialists = specialists
         self._num_workers = num_workers
@@ -154,7 +157,7 @@ class TaskWorkerPool:
 
         # Mark step as running
         step.status = "running"
-        step.started_at = time.time()
+        step.started_at = self._clock.now()
         task_store.update_step(task_id, step)
 
         # Also mark the overall plan as running
@@ -169,7 +172,7 @@ class TaskWorkerPool:
         if not agent:
             step.status = "failed"
             step.error = f"Specialist '{step.agent}' not available."
-            step.completed_at = time.time()
+            step.completed_at = self._clock.now()
             task_store.update_step(task_id, step)
             logger.error(f"[TaskWorker] {step.error}")
         else:
@@ -177,13 +180,13 @@ class TaskWorkerPool:
                 result_text = agent.run(user_input=step.query)
                 step.status = "done"
                 step.result = result_text
-                step.completed_at = time.time()
+                step.completed_at = self._clock.now()
                 task_store.update_step(task_id, step)
                 logger.info(f"[TaskWorker] Step {step_id} completed for task '{task_id}'.")
             except Exception as e:
                 step.status = "failed"
                 step.error = str(e)
-                step.completed_at = time.time()
+                step.completed_at = self._clock.now()
                 task_store.update_step(task_id, step)
                 logger.error(f"[TaskWorker] Step {step_id} failed for task '{task_id}': {e}")
 

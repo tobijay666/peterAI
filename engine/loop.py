@@ -33,12 +33,14 @@ class REPLEngine:
         guardrails: GuardrailManager,
         worker_pool: Optional[TaskWorkerPool] = None,
         router: Optional[LLMRouter] = None,
+        context_builder: Optional[object] = None
     ):
         self.peter = peter_agent
         self.tts = tts_service
         self.guardrails = guardrails
         self.worker_pool = worker_pool
         self.router = router
+        self.context_builder = context_builder
         self.running = False
         # Queue of completed-task announcements to print on the next REPL prompt
         self._pending_announcements: list = []
@@ -138,6 +140,14 @@ class REPLEngine:
                 if user_input.lower() == "reload-guardrails":
                     self.guardrails.reload()
                     print(format_agent("Peter", "Guardrail rules reloaded successfully, Sir."))
+                    continue
+                    
+                if user_input.lower().startswith("recall "):
+                    query = user_input[7:].strip()
+                    if self.context_builder:
+                        print(format_agent("Peter", self.context_builder.explain(query)))
+                    else:
+                        print(format_agent("Peter", "ContextBuilder is not available."))
                     continue
 
                 # Run Peter agent (sync or async depending on query complexity)

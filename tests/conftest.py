@@ -8,6 +8,10 @@ from core.guardrails import GuardrailManager
 from memory.vector_store import VectorMemory
 from memory.graph_store import GraphMemory
 
+from core.clock import FakeClock
+from tests.fakes.fake_llm import FakeLLMRouter
+from tests.fakes.fake_embedder import FakeEmbeddingFunction
+
 
 @pytest.fixture
 def temp_dir():
@@ -57,3 +61,18 @@ def graph_memory(temp_dir):
     gm = GraphMemory(database_path=str(db_file))
     yield gm
     gm.close()  # checkpoint WAL and release file lock before temp dir cleanup
+
+@pytest.fixture
+def fake_clock():
+    """A FakeClock starting at epoch 0. Advance with clock.advance(days=N)."""
+    return FakeClock(start=0.0)
+
+@pytest.fixture
+def fake_llm():
+    """A FakeLLMRouter with default empty script (returns default reply)."""
+    return FakeLLMRouter()
+
+@pytest.fixture
+def fake_embedder():
+    """A FakeEmbeddingFunction — deterministic, no network required."""
+    return FakeEmbeddingFunction()

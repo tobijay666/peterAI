@@ -1,0 +1,5 @@
+Checking doc drift...
+Doc drift check failed:
+  - Missing doc file: db_schema.md
+  - Missing doc file: guardrail_rules.md
+  - Missing doc file: event_topics.md

@@ -1,0 +1,24 @@
+{"step": "snapshot", "path": "data\\snapshots\\snap_1700090000", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "consolidation", "semantic_written": 0, "skills_created": 0, "sources_decayed": 0, "dry_run": false, "timestamp": 1700090000.0, "mode": "active"}
+{"step": "eviction", "note": "ran", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "snapshot", "path": "data\\snapshots\\snap_1700090000", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "consolidation", "semantic_written": 1, "skills_created": 0, "sources_decayed": 3, "dry_run": false, "timestamp": 1700090000.0, "mode": "active"}
+{"step": "eviction", "note": "ran", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "snapshot", "path": "data\\snapshots\\snap_1700090000", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "consolidation", "semantic_written": 1, "skills_created": 0, "sources_decayed": 3, "dry_run": false, "timestamp": 1700090000.0, "mode": "active"}
+{"step": "eviction", "note": "ran", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "snapshot", "path": "data\\snapshots\\snap_1700090000", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "consolidation", "semantic_written": 1, "skills_created": 0, "sources_decayed": 3, "dry_run": false, "timestamp": 1700090000.0, "mode": "active"}
+{"step": "eviction", "note": "ran", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "snapshot", "path": "data\\snapshots\\snap_1700090000", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "consolidation", "semantic_written": 1, "skills_created": 0, "sources_decayed": 3, "dry_run": false, "timestamp": 1700090000.0, "mode": "active"}
+{"step": "eviction", "note": "ran", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "snapshot", "path": "data\\snapshots\\snap_1702768400", "timestamp": 1702768400.0, "mode": "active"}
+{"step": "consolidation", "semantic_written": 0, "skills_created": 0, "sources_decayed": 0, "dry_run": false, "timestamp": 1702768400.0, "mode": "active"}
+{"step": "eviction", "note": "ran", "timestamp": 1702768400.0, "mode": "active"}
+{"step": "snapshot", "path": "data\\snapshots\\snap_1700090000", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "consolidation", "semantic_written": 1, "skills_created": 0, "sources_decayed": 3, "dry_run": false, "timestamp": 1700090000.0, "mode": "active"}
+{"step": "eviction", "note": "ran", "timestamp": 1700090000.0, "mode": "active"}
+{"step": "snapshot", "path": "data\\snapshots\\snap_1702768400", "timestamp": 1702768400.0, "mode": "active"}
+{"step": "consolidation", "semantic_written": 0, "skills_created": 0, "sources_decayed": 0, "dry_run": false, "timestamp": 1702768400.0, "mode": "active"}
+{"step": "eviction", "note": "ran", "timestamp": 1702768400.0, "mode": "active"}

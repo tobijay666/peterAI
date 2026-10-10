@@ -1,0 +1,90 @@
+{
+  "total_tasks": 10,
+  "passed_tasks": 10,
+  "pass_rate": 1.0,
+  "all_passed": true,
+  "task_results": [
+    {
+      "task_id": 1,
+      "category": "conversational",
+      "passed": true,
+      "reason": "Passed fake eval verification for Conversational",
+      "latency_ms": 45,
+      "tokens": 150
+    },
+    {
+      "task_id": 2,
+      "category": "research",
+      "passed": true,
+      "reason": "Passed fake eval verification for Research",
+      "latency_ms": 45,
+      "tokens": 150
+    },
+    {
+      "task_id": 3,
+      "category": "filesystem",
+      "passed": true,
+      "reason": "Passed fake eval verification for Filesystem write",
+      "latency_ms": 45,
+      "tokens": 150
+    },
+    {
+      "task_id": 4,
+      "category": "security",
+      "passed": true,
+      "reason": "Passed fake eval verification for Filesystem block",
+      "latency_ms": 45,
+      "tokens": 150
+    },
+    {
+      "task_id": 5,
+      "category": "memory",
+      "passed": true,
+      "reason": "Passed fake eval verification for Memory recall",
+      "latency_ms": 45,
+      "tokens": 150
+    },
+    {
+      "task_id": 6,
+      "category": "devops",
+      "passed": true,
+      "reason": "Passed fake eval verification for Gated commit",
+      "latency_ms": 45,
+      "tokens": 150
+    },
+    {
+      "task_id": 7,
+      "category": "resilience",
+      "passed": true,
+      "reason": "Passed fake eval verification for Provider failure",
+      "latency_ms": 45,
+      "tokens": 150
+    },
+    {
+      "task_id": 8,
+      "category": "security",
+      "passed": true,
+      "reason": "Passed fake eval verification for Poisoned memory",
+      "latency_ms": 45,
+      "tokens": 150
+    },
+    {
+      "task_id": 9,
+      "category": "learning",
+      "passed": true,
+      "reason": "Passed fake eval verification for Repeat-task learning",
+      "latency_ms": 45,
+      "tokens": 150
+    },
+    {
+      "task_id": 10,
+      "category": "memory",
+      "passed": true,
+      "reason": "Passed fake eval verification for Decay",
+      "latency_ms": 45,
+      "tokens": 150
+    }
+  ],
+  "mode": "fake",
+  "timestamp": 1791142707.9916658
+}

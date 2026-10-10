@@ -7,13 +7,23 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from core.logger import logger
+from core.clock import Clock, SystemClock
 
+VALID_NODE_KINDS = {"task", "agent", "artifact", "skill", "finding", "episode", "semantic"}
+VALID_RELATIONS = {
+    "produced", "used", "delegated_to", "depends_on",
+    "exercised",
+    "derived_from",
+    "supersedes",
+    "requires",
+}
 
 class GraphMemory:
     """Manages relationship nodes and edges in SQLite with WAL mode."""
 
-    def __init__(self, database_path: str = "data/peter_graph.db"):
+    def __init__(self, database_path: str = "data/peter_graph.db", clock: Optional[Clock] = None):
         self.db_path = Path(database_path)
+        self._clock = clock or SystemClock()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -66,8 +76,68 @@ class GraphMemory:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_kind ON nodes(kind);")
+            self._migrate_to_v2(conn)
             conn.commit()
         logger.info(f"GraphMemory initialized at {self.db_path}")
+
+    def _migrate_to_v2(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER NOT NULL,
+                applied_at REAL NOT NULL
+            );
+            """
+        )
+        row = conn.execute("SELECT MAX(version) as version FROM schema_version").fetchone()
+        version = row["version"] if row and row["version"] is not None else 0
+        if version < 2:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS outcomes (
+                    id          TEXT PRIMARY KEY,
+                    task_id     TEXT NOT NULL,
+                    step_id     TEXT,
+                    level       TEXT NOT NULL,
+                    agent       TEXT NOT NULL,
+                    tool        TEXT,
+                    skill_id    TEXT,
+                    provider    TEXT,
+                    model       TEXT,
+                    status      TEXT NOT NULL,
+                    latency_ms  INTEGER,
+                    tokens_in   INTEGER,
+                    tokens_out  INTEGER,
+                    memory_ids  TEXT,
+                    created_at  REAL NOT NULL
+                );
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_outcomes_task ON outcomes(task_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_outcomes_skill ON outcomes(skill_id);")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id         TEXT PRIMARY KEY,
+                    task_id    TEXT NOT NULL,
+                    rating     INTEGER NOT NULL,
+                    note       TEXT,
+                    created_at REAL NOT NULL
+                );
+                """
+            )
+            conn.execute(
+                """
+                CREATE VIEW IF NOT EXISTS v_skill_stats AS
+                SELECT o.skill_id,
+                       COUNT(*) AS uses,
+                       SUM(CASE WHEN o.status = 'success' AND COALESCE(f.rating, 0) >= 0 THEN 1 ELSE 0 END) AS successes
+                FROM outcomes o LEFT JOIN feedback f ON f.task_id = o.task_id
+                WHERE o.level = 'task' AND o.skill_id IS NOT NULL
+                GROUP BY o.skill_id;
+                """
+            )
+            conn.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)", (2, self._clock.now()))
 
     def upsert_node(
         self,
@@ -78,7 +148,11 @@ class GraphMemory:
         importance: float = 0.5,
         pinned: bool = False,
     ) -> str:
-        now = time.time()
+        if kind not in VALID_NODE_KINDS:
+            logger.warning(f"GraphMemory.upsert_node: Unknown node kind '{kind}'.")
+        if kind == 'skill' and not data:
+            data = {}
+        now = self._clock.now()
         data_str = json.dumps(data) if data else "{}"
         pinned_int = 1 if pinned else 0
 
@@ -107,8 +181,10 @@ class GraphMemory:
         relation: str,
         data: Optional[Dict[str, Any]] = None,
     ) -> str:
+        if relation not in VALID_RELATIONS:
+            logger.warning(f"GraphMemory.link: Unknown relation '{relation}'.")
         edge_id = str(uuid.uuid4())
-        now = time.time()
+        now = self._clock.now()
         data_str = json.dumps(data) if data else "{}"
 
         with self._get_connection() as conn:
@@ -190,7 +266,7 @@ class GraphMemory:
         max_age_days: float = 30,
         min_importance: float = 0.3,
     ) -> int:
-        now = time.time()
+        now = self._clock.now()
         cutoff = now - (max_age_days * 86400)
         with self._get_connection() as conn:
             cursor = conn.execute(
@@ -206,3 +282,51 @@ class GraphMemory:
             conn.commit()
             logger.info(f"GraphMemory: Pruned {count} stale graph nodes.")
             return count
+
+    def get_nodes_by_kind(self, kind: str) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT id, kind, label, data, created_at, last_used, importance, pinned FROM nodes WHERE kind = ?;",
+                (kind,)
+            )
+            return [
+                {
+                    "id": r["id"],
+                    "kind": r["kind"],
+                    "label": r["label"],
+                    "data": json.loads(r["data"] or "{}"),
+                    "created_at": r["created_at"],
+                    "last_used": r["last_used"],
+                    "importance": r["importance"],
+                    "pinned": bool(r["pinned"]),
+                }
+                for r in cursor.fetchall()
+            ]
+
+    def get_skill_source_tasks(self, skill_id: str) -> List[str]:
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT src FROM edges WHERE dst = ? AND relation = 'derived_from';",
+                (skill_id,)
+            )
+            return [r["src"] for r in cursor.fetchall()]
+
+    def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT id, kind, label, data, created_at, last_used, importance, pinned FROM nodes WHERE id = ?;",
+                (node_id,)
+            )
+            r = cursor.fetchone()
+            if not r:
+                return None
+            return {
+                "id": r["id"],
+                "kind": r["kind"],
+                "label": r["label"],
+                "data": json.loads(r["data"] or "{}"),
+                "created_at": r["created_at"],
+                "last_used": r["last_used"],
+                "importance": r["importance"],
+                "pinned": bool(r["pinned"]),
+            }

@@ -1,0 +1,150 @@
+{
+  "timestamp": 1791142707.8832166,
+  "fake_mode": true,
+  "providers": {
+    "nvidia": {
+      "name": "NVIDIA NIM",
+      "api_key_present": false,
+      "models": [
+        {
+          "model_id": "deepseek-ai/deepseek-v4.1-flash",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "z-ai/glm-5-3",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "z-ai/glm-5-3-flash",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "moonshotai/kimi-k3",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "meta/llama-3.3-70b-instruct",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        }
+      ]
+    },
+    "groq": {
+      "name": "Groq",
+      "api_key_present": false,
+      "models": [
+        {
+          "model_id": "openai/gpt-oss-120b",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "openai/gpt-oss-20b",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "qwen/qwen3.8-27b",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "canopylabs/orpheus-v1-english",
+          "status": "failed",
+          "latency_ms": 0,
+          "error": "Non-chat / invalid model"
+        },
+        {
+          "model_id": "llama-3.3-70b-versatile",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "llama-3.1-8b-instant",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        }
+      ]
+    },
+    "openrouter": {
+      "name": "OpenRouter",
+      "api_key_present": false,
+      "models": [
+        {
+          "model_id": "meta-llama/llama-3.3-70b-instruct",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "deepseek/deepseek-r1",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "anthropic/claude-3.5-sonnet",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "google/gemini-2.5-flash",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "qwen/qwen-2.5-72b-instruct",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        }
+      ]
+    },
+    "huggingface": {
+      "name": "HuggingFace",
+      "api_key_present": false,
+      "models": [
+        {
+          "model_id": "meta-llama/Llama-3.3-70B-Instruct",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        },
+        {
+          "model_id": "Qwen/Qwen2.5-72B-Instruct",
+          "status": "ok",
+          "latency_ms": 120,
+          "error": null
+        }
+      ]
+    }
+  }
+}

@@ -59,6 +59,25 @@ class GuardrailManager:
         """Evaluates LLM generation output against guardrail rules."""
         return self._evaluate(target_text=output_text, target_type="output")
 
+    def check_memory_write(self, text: str, namespace: str = "", trust: str = "") -> GuardrailResult:
+        """Check if a memory write is allowed (FR-16.2).
+        Runs the injection scanner; quarantined writes are blocked.
+        """
+        from memory.trust import injection_scan  # avoid circular import at module level
+        try:
+            poisoned, desc = injection_scan(text)
+            if poisoned:
+                return GuardrailResult(
+                    allowed=False,
+                    rule_id="MEMORY_INJECTION",
+                    message=f"Memory write blocked: injection pattern detected [{desc}]",
+                    action="block",
+                )
+        except Exception as e:
+            logger.warning(f"check_memory_write scanner error (fail-open): {e}")
+        # Also run standard output check for any scrubbing rules
+        return self.check_output(text)
+
     def _evaluate(self, target_text: str, target_type: str, tool_name: Optional[str] = None) -> GuardrailResult:
         for rule in self.compiled_rules:
             applies_to = rule.get("applies_to", [])

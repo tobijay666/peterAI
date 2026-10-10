@@ -4,6 +4,7 @@ import threading
 import time
 from typing import Optional
 from core.logger import logger
+from core.clock import Clock, SystemClock
 from memory.graph_store import GraphMemory
 from memory.vector_store import VectorMemory
 
@@ -19,7 +20,9 @@ class EvictionScheduler:
         max_age_days: float = 30.0,
         min_access_count: int = 2,
         importance_threshold: float = 0.3,
+        clock: Optional[Clock] = None,
     ):
+        self._clock = clock or SystemClock()
         self.vector_store = vector_store
         self.graph_store = graph_store
         self.interval_sec = interval_hours * 3600.0
@@ -46,7 +49,7 @@ class EvictionScheduler:
     def run_eviction(self) -> None:
         """Evaluates decay criteria across vector namespaces and graph database."""
         logger.info("EvictionScheduler: Running decay eviction cycle...")
-        now = time.time()
+        now = self._clock.now()
         max_age_sec = self.max_age_days * 86400.0
 
         total_evicted_vectors = 0

@@ -1,0 +1,96 @@
+﻿............................................                             [100%]
+============================== warnings summary ===============================
+tests/property/test_guardrails_hypothesis.py::test_guardrails_never_crash
+  C:\Python313\Lib\json\decoder.py:361: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x0000022D999731F0>
+    obj, end = self.scan_once(s, idx)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/property/test_guardrails_hypothesis.py::test_guardrails_never_crash
+  C:\Python313\Lib\json\decoder.py:361: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x0000022D99971A80>
+    obj, end = self.scan_once(s, idx)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/property/test_guardrails_hypothesis.py::test_guardrails_never_crash
+  C:\Python313\Lib\json\decoder.py:361: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x0000022D999714E0>
+    obj, end = self.scan_once(s, idx)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/property/test_guardrails_hypothesis.py::test_guardrails_never_crash
+  C:\Python313\Lib\json\decoder.py:361: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x0000022D99973970>
+    obj, end = self.scan_once(s, idx)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/property/test_guardrails_hypothesis.py::test_guardrails_never_crash
+  C:\Python313\Lib\json\decoder.py:361: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x0000022D99973A60>
+    obj, end = self.scan_once(s, idx)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_guardrails.py::test_guardrail_clean_input_allowed
+  C:\Python313\Lib\logging\__init__.py:148: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x0000022D99A52C50>
+    result = _levelToName.get(level)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_guardrails.py::test_guardrail_clean_input_allowed
+  C:\Python313\Lib\logging\__init__.py:148: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x0000022D99A52A70>
+    result = _levelToName.get(level)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_guardrails.py::test_guardrail_clean_input_allowed
+  C:\Python313\Lib\logging\__init__.py:148: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x0000022D99A52980>
+    result = _levelToName.get(level)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_guardrails.py::test_guardrail_clean_input_allowed
+  C:\Python313\Lib\logging\__init__.py:148: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x0000022D99A53880>
+    result = _levelToName.get(level)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_guardrails.py::test_guardrail_clean_input_allowed
+  C:\Python313\Lib\logging\__init__.py:148: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x0000022D99A527A0>
+    result = _levelToName.get(level)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.13.7-final-0 _______________
+
+Name                           Stmts   Miss  Cover   Missing
+------------------------------------------------------------
+core\__init__.py                   0      0   100%
+core\console.py                   25     25     0%   3-48
+core\events.py                    20      2    90%   29-30
+core\guardrails.py                84     31    63%   24-27, 40-41, 45, 60, 79-80, 85, 88-93, 96-97, 100-105, 108-113
+core\interfaces.py                72      4    94%   36, 38, 40, 88
+core\logger.py                    30      2    93%   48-49
+engine\loop.py                   124    124     0%   10-210
+engine\task_compiler.py           39      6    85%   43-44, 85-88
+engine\task_planner.py            50     16    68%   75-82, 120, 134-149
+engine\task_queue.py             121     18    85%   70-71, 105, 126-127, 135-136, 140-141, 145, 151-153, 170-174
+engine\task_store.py              87     14    84%   124-125, 136-138, 158-159, 177-183
+llm\__init__.py                    0      0   100%
+llm\health.py                     51     51     0%   3-72
+llm\providers\__init__.py          0      0   100%
+llm\providers\base.py            103     23    78%   47-49, 70, 74-90, 114, 116, 134, 155, 163-164, 174, 208
+llm\providers\groq.py              7      0   100%
+llm\providers\huggingface.py       7      1    86%   18
+llm\providers\nvidia.py            7      0   100%
+llm\providers\openrouter.py       69     21    70%   56-57, 67-68, 72, 76-92, 109
+llm\router.py                     64     19    70%   33-35, 53-55, 58-65, 78-79, 87-88, 103-109
+memory\__init__.py                 0      0   100%
+memory\embeddings.py              59     21    64%   21-41, 65, 69, 84, 91
+memory\eviction.py                51     51     0%   3-81
+memory\graph_store.py             82     11    87%   33-34, 136, 193-208
+memory\vector_store.py           135     51    62%   46-75, 113-115, 132, 135, 139-141, 145, 165-166, 189-191, 197, 205, 210-211, 213-215, 218-231
+------------------------------------------------------------
+TOTAL                           1287    491    62%
+44 passed, 10 warnings in 58.58s

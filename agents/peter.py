@@ -144,7 +144,7 @@ class PeterAgent(BaseAgent):
             return f"I'm sorry, Sir — that request was blocked: {gr_res.message}"
 
         try:
-            plan, plan_summary = task_planner.create_plan(
+            plan, plan_summary, _ctx = task_planner.create_plan(
                 query=user_input,
                 router=self.router,
                 policy=self.policy,

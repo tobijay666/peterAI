@@ -1,10 +1,10 @@
 """OpenRouter provider implementation with dynamic model discovery and 15-day caching."""
 
 import json
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import requests
+from core.clock import SystemClock
 from core.logger import logger
 from llm.providers.base import BaseProvider
 
@@ -41,7 +41,7 @@ class OpenRouterProvider(BaseProvider):
             "qwen/qwen-2.5-72b-instruct",
         ]
 
-        now = time.time()
+        now = SystemClock().now()
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
 
         if not force_refresh and self.cache_path.exists():
