@@ -2,7 +2,8 @@
 
 import threading
 import time
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
+from core.clock import Clock, SystemClock
 from core.logger import logger
 from llm.router import LLMRouter
 
@@ -10,10 +11,12 @@ from llm.router import LLMRouter
 class HealthProber:
     """Probes provider model endpoints and manages cooldown for failing endpoints."""
 
-    def __init__(self, router: LLMRouter, probe_interval_sec: int = 600, cooldown_sec: int = 300):
+    def __init__(self, router: LLMRouter, probe_interval_sec: int = 600, cooldown_sec: int = 300,
+                 clock: Optional[Clock] = None):
         self.router = router
         self.probe_interval_sec = probe_interval_sec
         self.cooldown_sec = cooldown_sec
+        self._clock = clock or SystemClock()
         # Map (provider, model) -> (is_alive, last_fail_timestamp, failure_count)
         self.health_state: Dict[Tuple[str, str], Tuple[bool, float, int]] = {}
         self._running = False
@@ -49,7 +52,7 @@ class HealthProber:
                     self.health_state[key] = (True, 0.0, 0)
                 else:
                     new_fail_cnt = fail_cnt + 1
-                    self.health_state[key] = (False, time.time(), new_fail_cnt)
+                    self.health_state[key] = (False, self._clock.now(), new_fail_cnt)
                     logger.warning(
                         f"HealthProber: Model {prov_key}:{model} failed probe (fail count: {new_fail_cnt})"
                     )
@@ -65,7 +68,7 @@ class HealthProber:
 
         # Check circuit breaker cooldown
         if fail_cnt >= 3:
-            if time.time() - last_fail > self.cooldown_sec:
+            if self._clock.now() - last_fail > self.cooldown_sec:
                 logger.info(f"HealthProber: Cooldown expired for {provider_key}:{model}, allowing retry.")
                 return True
             return False

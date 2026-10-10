@@ -1,0 +1,34 @@
+# Peter AI v1.3.0 — Evolution configuration
+# All thresholds live here; never hard-code them in application code.
+
+skills:
+  promote_min_successes: 3
+  promote_min_success_rate: 0.80
+  deprecate_window: 5
+  deprecate_below_rate: 0.50
+  deprecate_after_consecutive_failures: 2
+  deprecate_after_bad_ratings: 3
+
+consolidation:
+  min_age_hours: 24
+  similarity_threshold: 0.80
+  min_cluster_size: 3
+  source_importance_factor: 0.5
+
+recall:
+  min_similarity: 0.35
+  top_k: 8
+  skill_min_similarity: 0.60
+
+importance:
+  success_delta: 0.05
+  failure_delta: -0.10
+  bad_feedback_delta: -0.20
+
+tuner:
+  min_samples: 30
+  protected_paths:
+    - config/guardrails.json
+    - .env
+    - tests/
+    - core/guardrails.py

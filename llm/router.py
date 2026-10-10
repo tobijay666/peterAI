@@ -22,11 +22,20 @@ PROVIDER_CLASSES = {
 class LLMRouter:
     """Orchestrates provider execution policies, fallback sequences, and token accounting."""
 
-    def __init__(self, config_path: str = "config/providers.yaml"):
+    def __init__(
+        self,
+        config_path: str = "config/providers.yaml",
+        providers: Optional[Dict[str, BaseProvider]] = None,
+    ):
         self.config_path = Path(config_path)
         self.providers: Dict[str, BaseProvider] = {}
         self.token_stats: Dict[str, int] = {}
-        self.load_config()
+        if providers is not None:
+            # Test/injection path: skip config loading entirely
+            self.providers = providers
+            self.token_stats = {k: 0 for k in providers}
+        else:
+            self.load_config()
 
     def load_config(self) -> None:
         if not self.config_path.exists():

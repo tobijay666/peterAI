@@ -15,7 +15,7 @@ Design choices:
 import json
 import re
 import time
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from core.interfaces import TaskPlan, TaskStep, TaskStatus
 from core.logger import logger
@@ -86,7 +86,9 @@ def create_plan(
     query: str,
     router: LLMRouter,
     policy: Optional[List[str]] = None,
-) -> TaskPlan:
+    context_builder: Optional[Any] = None,
+    skill_hint: Optional[str] = None,
+) -> tuple:
     """Runs the planning LLM call and returns a populated TaskPlan.
 
     If the LLM fails or returns malformed output, falls back to a
@@ -94,8 +96,21 @@ def create_plan(
     """
     plan = task_store.create_task(query)
 
+    recalled_ctx = None
+    system_prompt = PLANNER_SYSTEM_PROMPT
+
+    if context_builder is not None:
+        recalled_ctx = context_builder.build(query)
+        if recalled_ctx.memory_text:
+            system_prompt = recalled_ctx.memory_text + "\n\n" + system_prompt
+        if recalled_ctx.skill_hint:
+            skill_hint = recalled_ctx.skill_hint
+
+    if skill_hint:
+        system_prompt += f"\n\nSKILL HINT: A similar task has been done before. Consider using this pattern:\n{skill_hint}"
+
     messages = [
-        Message(role="system", content=PLANNER_SYSTEM_PROMPT),
+        Message(role="system", content=system_prompt),
         Message(role="user", content=f"Decompose this request into steps:\n\n{query}"),
     ]
 
@@ -129,7 +144,7 @@ def create_plan(
             plan_summary = data.get("summary", f"Plan with {len(steps)} step(s) created.")
             task_store.save_plan(plan)
             logger.info(f"[TaskPlanner] Plan '{plan.task_id}' created with {len(steps)} step(s).")
-            return plan, plan_summary
+            return plan, plan_summary, recalled_ctx
         else:
             raise ValueError(f"Malformed planner output: {raw[:200]}")
 
@@ -146,4 +161,4 @@ def create_plan(
         plan.status = TaskStatus.QUEUED.value
         task_store.save_plan(plan)
         summary = "I'll work on this for you, Sir. I've created a single-step plan."
-        return plan, summary
+        return plan, summary, recalled_ctx

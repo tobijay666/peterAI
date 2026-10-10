@@ -168,7 +168,7 @@ class TestFullAsyncPipeline:
 
         # Create a plan with 2 sequential steps
         mock_router = _make_mock_router()
-        plan, summary = task_planner.create_plan(
+        plan, summary, _ctx = task_planner.create_plan(
             query="Research X and save the results",
             router=mock_router,
         )

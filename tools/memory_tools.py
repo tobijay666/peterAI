@@ -4,16 +4,19 @@ from typing import Any, Dict, Optional
 from core.interfaces import ToolResult
 from memory.graph_store import GraphMemory
 from memory.vector_store import VectorMemory
+from memory.skills import SkillStore
 
 # Singleton instances initialized at runtime
 _vector_instance: Optional[VectorMemory] = None
 _graph_instance: Optional[GraphMemory] = None
+_skill_store: Optional[SkillStore] = None
 
 
-def init_memory_tools(vector: VectorMemory, graph: GraphMemory):
-    global _vector_instance, _graph_instance
+def init_memory_tools(vector: VectorMemory, graph: GraphMemory, skill_store: Optional[SkillStore] = None):
+    global _vector_instance, _graph_instance, _skill_store
     _vector_instance = vector
     _graph_instance = graph
+    _skill_store = skill_store if skill_store else SkillStore(graph=graph)
 
 
 def memory_recall(namespace: str, query: str, n_results: int = 5) -> ToolResult:
@@ -99,3 +102,39 @@ def graph_query(node_id: str, max_depth: int = 2) -> ToolResult:
             f"Node: {n['node']['label']} ({n['node']['kind']}) | Edge: {n['src']} -> {n['relation']} -> {n['dst']}"
         )
     return ToolResult(success=True, output="\n".join(formatted))
+
+def skill_list(status: str = "active") -> ToolResult:
+    """List skills by status (active/candidate/deprecated)."""
+    if not _skill_store:
+        return ToolResult(success=False, output="", error="SkillStore not initialized.")
+    skills = _skill_store.list_skills(status=status)
+    if not skills:
+        return ToolResult(success=True, output=f"No {status} skills found.")
+    
+    formatted = []
+    for s in skills:
+        trigger = s.get("trigger", "")
+        sid = s.get("skill_id", "")
+        formatted.append(f"[{sid}] {trigger}")
+    return ToolResult(success=True, output="\n".join(formatted))
+
+def skill_get(skill_id: str) -> ToolResult:
+    """Get details of a specific skill."""
+    if not _skill_store:
+        return ToolResult(success=False, output="", error="SkillStore not initialized.")
+    skill = _skill_store.get_skill(skill_id)
+    if not skill:
+        return ToolResult(success=False, output="", error=f"Skill not found: {skill_id}")
+    import json
+    return ToolResult(success=True, output=json.dumps(skill, indent=2))
+
+def skill_deprecate(skill_id: str, reason: str = "", _caller_agent: str = "") -> ToolResult:
+    """Deprecate a skill. Only callable by the librarian agent."""
+    if _caller_agent != "librarian":
+        return ToolResult(success=False, output="", error="Permission denied. Only librarian can deprecate skills.")
+    if not _skill_store:
+        return ToolResult(success=False, output="", error="SkillStore not initialized.")
+    ok = _skill_store._set_status(skill_id, None, "deprecated")
+    if ok:
+        return ToolResult(success=True, output=f"Skill {skill_id} deprecated successfully. Reason: {reason}")
+    return ToolResult(success=False, output="", error=f"Failed to deprecate skill {skill_id}.")

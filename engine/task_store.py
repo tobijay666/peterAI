@@ -9,10 +9,10 @@ directory (PETER_WORKSPACE/tasks/<task_id>/). This approach:
 
 import json
 import os
-import time
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
+from core.clock import SystemClock
 
 from core.interfaces import TaskPlan, TaskStep, TaskStatus
 from core.logger import logger
@@ -107,7 +107,7 @@ def create_task(query: str) -> TaskPlan:
     plan = TaskPlan(
         task_id=task_id,
         original_query=query,
-        created_at=time.time(),
+        created_at=SystemClock().now(),
         status=TaskStatus.PLANNING.value,
     )
     save_plan(plan)

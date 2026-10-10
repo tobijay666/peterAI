@@ -403,18 +403,18 @@ Requirement IDs continue from SRAS v1.0 (FR-1 to FR-11). The full wording moves 
 
 ### Phase A — Baseline and test foundations (blocks everything) · size M
 
-- [ ] **A1 · Establish the truth** (S)
+- [x] **A1 · Establish the truth** (S)
   Run the full suite as-is. Save output to `validation/baseline/`.
   *Done when:* one test count is confirmed; the 10-vs-40 discrepancy is explained in the Progress Log; the §2.3 assumptions are each ticked or corrected.
-- [ ] **A2 · Injectable clock** (M) — `core/clock.py`
+- [x] **A2 · Injectable clock** (M) — `core/clock.py`
   Replace direct `time.time()` in vector store, graph store, eviction, task queue, and the new modules.
   *Done when:* a test fails if `time.time()` appears outside `core/clock.py`; existing tests still pass; `FakeClock.advance(days=31)` works in a test.
-- [ ] **A3 · Fakes** (M) — `tests/fakes/`
+- [x] **A3 · Fakes** (M) — `tests/fakes/`
   `FakeLLM` (scripted replies, tool calls, failures, timeouts), `FakeEmbedder` (deterministic, fast), factories for episodes/tasks/outcomes.
   *Done when:* the suite no longer needs the real MiniLM model except in one integration test (the current run takes 22s for 10 tests).
-- [ ] **A4 · pytest config** (S) — `pytest.ini`
+- [x] **A4 · pytest config** (S) — `pytest.ini`
   Markers `req`, `slow`, `live`, `docs`; junit output; coverage config for `core/ memory/ llm/ engine/`.
-- [ ] **A5 · Close the existing test gaps** (L)
+- [x] **A5 · Close the existing test gaps** (L)
   Every item below gets a test and a `req` marker:
   - Router: provider failure falls through (FR-9.4); all providers down raises `ProviderError`; dead model skipped, re-probed after cooldown (FR-9.6); circuit breaker opens at 3 failures.
   - Memory: store→recall roundtrip survives restart (reopen the DB); pinned record survives eviction (FR-8.6); unpinned idle record evicted after 30 simulated days (FR-8.5); graph edge survives source-node update.
@@ -423,10 +423,10 @@ Requirement IDs continue from SRAS v1.0 (FR-1 to FR-11). The full wording moves 
   - Guardrails: API key in output is scrubbed; `rmtree` in a tool call blocked; system-prompt extraction blocked.
   - Agents: Peter delegates and aggregates (FR-1.3); DevOps refuses commit when QA fails (FR-5.2); FileSystem write outside workspace raises `PermissionError` (FR-3.2).
   - *Done when:* every "Mandatory Test Case" in SRAS v1.0 §16.2 maps to a passing test.
-- [ ] **A6 · Verify model ladders** (M) — `scripts/probe_models.py`
+- [x] **A6 · Verify model ladders** (M) — `scripts/probe_models.py`
   Run by Sir Anton with real keys. Probe every model ID in every ladder as a chat completion.
   *Done when:* `model_probe.json` is committed; non-chat or dead models (including the Groq `orpheus` entry if it fails) are removed; each provider keeps ≥ 3 working chat models (FR-9.2).
-- [ ] **A7 · Dry-run eviction against the real `data/`** (S)
+- [x] **A7 · Dry-run eviction against the real `data/`** (S)
   *Done when:* a report shows what would be evicted today (expected: nothing, since the data is days old). This is the starting point for the shadow period.
 
 **Gate G1:** A1–A6 `[x]`; suite green; baseline committed.
@@ -435,27 +435,27 @@ Requirement IDs continue from SRAS v1.0 (FR-1 to FR-11). The full wording moves 
 
 ### Phase B — Outcome ledger (FR-12) · size M
 
-- [ ] **B1 · Schema v2 migration** (M) — `memory/graph_store.py`
+- [x] **B1 · Schema v2 migration** (M) — `memory/graph_store.py`
   *Done when:* a fixture v1 database migrates with all nodes and edges intact; running the migration twice changes nothing; `schema_version` is 2.
-- [ ] **B2 · OutcomeLedger** (M) — `memory/outcomes.py`
+- [x] **B2 · OutcomeLedger** (M) — `memory/outcomes.py`
   API: `record(...)`, `rate_task(...)`, `stats(agent|tool|model|skill, window)`.
   *Done when:* stats match hand-computed values on a fixture; the view `v_skill_stats` counts a task with a `-1` rating as a failure.
-- [ ] **B3 · Hooks** (M) — `tools/registry.py`, `engine/task_queue.py`, `engine/task_compiler.py`, `llm/router.py`
+- [x] **B3 · Hooks** (M) — `tools/registry.py`, `engine/task_queue.py`, `engine/task_compiler.py`, `llm/router.py`
   *Done when:*
   - a fake 3-step task writes 3 step rows and 1 task row with the right statuses;
   - a guardrail block is recorded as `blocked`, not `failure`;
   - a timeout is recorded as `timeout`;
   - ledger failure (simulated disk error) does not fail the turn (FR-12.2);
   - provider/model/tokens/latency are present on LLM-backed steps (closes FR-9.7).
-- [ ] **B4 · Importance adjustment** (S) — `memory/vector_store.py`
+- [x] **B4 · Importance adjustment** (S) — `memory/vector_store.py`
   *Done when:* success raises, failure lowers, `bad` lowers more; values clamp to [0, 1]; pinned records are unchanged. Hypothesis test: any sequence of adjustments stays in [0, 1].
 
 ---
 
 ### Phase C — Skill memory (FR-13) · size M
 
-- [ ] **C1 · Graph support** (S) — `skill` node kind, new relations, validation of kind and relation names.
-- [ ] **C2 · SkillStore** (L) — `memory/skills.py`
+- [x] **C1 · Graph support** (S) — `skill` node kind, new relations, validation of kind and relation names.
+- [x] **C2 · SkillStore** (L) — `memory/skills.py`
   `create_candidate`, `match(query, k)`, `evaluate_promotion`, `evaluate_deprecation`, `supersede`.
   *Done when:*
   - promotion flips at exactly 3 successes and not at 2; at 0.80 success rate and not at 0.79;
@@ -463,26 +463,26 @@ Requirement IDs continue from SRAS v1.0 (FR-1 to FR-11). The full wording moves 
   - `match` returns only `active` skills, ordered by similarity then success rate;
   - `supersede` keeps the old skill and its lineage edges;
   - thresholds are read from `config/evolution.yaml` (change the file, behaviour changes).
-- [ ] **C3 · Trigger embedding** (S) — trigger stored in `librarian` namespace; deleting/deprecating a skill removes it from matching.
-- [ ] **C4 · Template validation** (M)
+- [x] **C3 · Trigger embedding** (S) — trigger stored in `librarian` namespace; deleting/deprecating a skill removes it from matching.
+- [x] **C4 · Template validation** (M)
   *Done when:* a template that names an unregistered agent or tool, exceeds `max_steps`, or fails guardrails is rejected with a reason.
-- [ ] **C5 · Tools** (S) — `skill_list`, `skill_get`, `skill_deprecate`; only Librarian may deprecate; registered in the registry with schemas.
+- [x] **C5 · Tools** (S) — `skill_list`, `skill_get`, `skill_deprecate`; only Librarian may deprecate; registered in the registry with schemas.
 
 ---
 
 ### Phase D — Memory trust and safety (FR-16) · size M
 
-- [ ] **D1 · Trust metadata and scanner** (M) — `memory/trust.py`
+- [x] **D1 · Trust metadata and scanner** (M) — `memory/trust.py`
   *Done when:*
   - a poison corpus (≥ 15 strings: "ignore previous instructions", fake system/role headers, tool-call-shaped JSON, prompt-extraction phrasing, simple Unicode/spacing obfuscation) is 100% quarantined;
   - a benign corpus (≥ 50 realistic findings) has ≤ 5% false positives;
   - Hypothesis: the scanner never raises on arbitrary text.
-- [ ] **D2 · Researcher writes are tagged** (S)
+- [x] **D2 · Researcher writes are tagged** (S)
   Default `untrusted_web`; promoted to `tool_verified` only when the FR-2.4 two-origin check passed.
-- [ ] **D3 · `check_memory_write()`** (S) — `core/guardrails.py` + rules in `config/guardrails.json`; hot-reload covers them.
-- [ ] **D4 · Pin policy** (S)
+- [x] **D3 · `check_memory_write()`** (S) — `core/guardrails.py` + rules in `config/guardrails.json`; hot-reload covers them.
+- [x] **D4 · Pin policy** (S)
   *Done when:* pinning an untrusted or quarantined record is refused with a clear message.
-- [ ] **D5 · Backfill existing records** (S)
+- [x] **D5 · Backfill existing records** (S)
   Assign trust by namespace and kind; unknown → `untrusted_web`.
   *Done when:* after migration no record lacks a trust value; legacy Emma findings are handled and counted in the Progress Log.
 
@@ -490,7 +490,7 @@ Requirement IDs continue from SRAS v1.0 (FR-1 to FR-11). The full wording moves 
 
 ### Phase E — Context injection (FR-15) · size M
 
-- [ ] **E1 · ContextBuilder** (L) — `memory/recall.py`
+- [x] **E1 · ContextBuilder** (L) — `memory/recall.py`
   Query `peter` + `librarian` (plus the relevant namespace), filter by trust, match active skills, fit to the token budget with priority skills > semantic > episodes.
   *Done when:*
   - output never exceeds `RECALL_TOKEN_BUDGET`;
@@ -499,30 +499,30 @@ Requirement IDs continue from SRAS v1.0 (FR-1 to FR-11). The full wording moves 
   - ordering is deterministic for identical inputs;
   - returned `memory_ids` and `skill_ids` are recorded on the task (FR-15.3);
   - recall p95 < 500 ms on 10,000 records (`slow` marker, NFR-1.2).
-- [ ] **E2 · Wire into Peter and the planner** (M) — `agents/peter.py`, `engine/task_planner.py`
+- [x] **E2 · Wire into Peter and the planner** (M) — `agents/peter.py`, `engine/task_planner.py`
   *Done when:* with a matching active skill, the planner prompt contains the skill hint and the resulting task's outcome row carries its `skill_id`; with no match, the prompt is byte-identical to today's.
-- [ ] **E3 · Transparency** (S) — `recall <query>` command and `memory_explain` tool: show score, trust, age, and why each item was or wasn't included.
-- [ ] **E4 · Record the FR-1.4 amendment** in the Progress Log so it lands in SRAS v1.3.
+- [x] **E3 · Transparency** (S) — `recall <query>` command and `memory_explain` tool: show score, trust, age, and why each item was or wasn't included.
+- [x] **E4 · Record the FR-1.4 amendment** in the Progress Log so it lands in SRAS v1.3.
 
 ---
 
 ### Phase F — Consolidation (FR-14) · size L
 
-- [ ] **F1 · Candidate selection and clustering** (M) — `memory/consolidation.py`
+- [x] **F1 · Candidate selection and clustering** (M) — `memory/consolidation.py`
   Unpinned, trust ≥ `tool_verified` (or `user`), older than `min_age_hours`, not already consolidated; cosine clustering with `similarity_threshold` and `min_cluster_size`.
   *Done when:* a fixture with 3 known topics yields exactly 3 clusters; undersized clusters are left alone.
-- [ ] **F2 · Semantic summaries** (M)
+- [x] **F2 · Semantic summaries** (M)
   One router call per cluster. Output is scrubbed, passes `check_memory_write()`, and carries `source_ids`, `trust = min(sources)`, `importance = max(sources) × 0.9`.
   *Done when:* an LLM failure in one cluster leaves that cluster untouched and does not stop the others.
-- [ ] **F3 · Skill extraction** (M)
+- [x] **F3 · Skill extraction** (M)
   If the task graph shows the same ordered agent/tool sequence succeeded in ≥ `promote_min_successes` clusters' tasks, create a `candidate` skill with `derived_from` edges.
   *Done when:* repeated identical plans create one skill (not one per run); untrusted-only sources create none (FR-16.4).
-- [ ] **F4 · Source decay** (S)
+- [x] **F4 · Source decay** (S)
   Set `consolidated_into`, multiply source importance by `source_importance_factor`. Nothing is deleted here.
-- [ ] **F5 · Idempotency and atomicity** (M)
+- [x] **F5 · Idempotency and atomicity** (M)
   *Done when:* a second run produces zero new records; a crash injected mid-cluster leaves no partial semantic record.
-- [ ] **F6 · Dry-run** (S) — `consolidate --dry-run` prints clusters, planned summaries, planned skills; changes nothing (verified by comparing store hashes before and after).
-- [ ] **F7 · Invariants (Hypothesis)** (M)
+- [x] **F6 · Dry-run** (S) — `consolidate --dry-run` prints clusters, planned summaries, planned skills; changes nothing (verified by comparing store hashes before and after).
+- [x] **F7 · Invariants (Hypothesis)** (M)
   For arbitrary generated stores:
   - pinned records are never modified or lost (FR-14.3);
   - every semantic record's `source_ids` exist (live or decayed);
@@ -533,16 +533,16 @@ Requirement IDs continue from SRAS v1.0 (FR-1 to FR-11). The full wording moves 
 
 ### Phase G — Feedback and loop integration (FR-17, FR-20) · size L
 
-- [ ] **G1 · Feedback commands** (S) — `engine/feedback.py`, `engine/loop.py`
+- [x] **G1 · Feedback commands** (S) — `engine/feedback.py`, `engine/loop.py`
   *Done when:* `bad` binds to the last completed task, persists across restart, lowers importance of the memories that task cited, and counts against the skill used (FR-17.1, 17.2).
-- [ ] **G2 · EvolutionCoordinator** (L) — `engine/evolution.py`
+- [x] **G2 · EvolutionCoordinator** (L) — `engine/evolution.py`
   Subscribes to task events; runs the fixed cycle order on the existing 24h schedule; honours `EVOLUTION_MODE`.
   *Done when:* in `shadow` mode a full cycle changes nothing (store hashes equal) but writes what it *would* do; `off` does nothing; `active` mutates (FR-20.1). The existing eviction scheduler is subsumed by the cycle, not run twice.
-- [ ] **G3 · Journal and snapshots** (M) — `data/evolution/journal.jsonl`, `memory/snapshot.py`
+- [x] **G3 · Journal and snapshots** (M) — `data/evolution/journal.jsonl`, `memory/snapshot.py`
   *Done when:* every automatic mutation has a journal line (what, why, ids, before/after); restoring the latest snapshot reproduces the pre-cycle record counts exactly; only the last 3 snapshots are kept.
-- [ ] **G4 · Importance decay in the cycle** (S)
+- [x] **G4 · Importance decay in the cycle** (S)
   *Done when:* an episode that is never recalled and never used loses importance each cycle until it qualifies for eviction; a recalled-and-useful one doesn't. This is what makes eviction condition 4 reachable.
-- [ ] **G5 · The proof test** (L) — `tests/integration/test_learning_loop.py`
+- [x] **G5 · The proof test** (L) — `tests/integration/test_learning_loop.py`
   Scenario (FakeClock + FakeLLM, `active` mode):
   1. Fresh memory. Run a task family ("research topic X and save a summary") 3 times; one run has a flaky step.
   2. Advance 25 hours. Run the cycle.
@@ -561,21 +561,21 @@ Requirement IDs continue from SRAS v1.0 (FR-1 to FR-11). The full wording moves 
 
 ### Phase H — Bounded configuration evolution (FR-18) · size M
 
-- [ ] **H1 · PolicyTuner** (M) — `llm/policy_tuner.py`
+- [x] **H1 · PolicyTuner** (M) — `llm/policy_tuner.py`
   Reads the ledger per (agent, provider, model): success rate, p50/p95 latency over a window with ≥ `min_samples`. Proposes reordering of provider policy or model ladders, as a YAML diff plus a plain-language reason.
   *Done when:* below `min_samples`, no proposal is made; a model with a clearly worse record is proposed for demotion; identical data gives an identical proposal (idempotent).
-- [ ] **H2 · Protected paths** (S)
+- [x] **H2 · Protected paths** (S)
   *Done when:* a Hypothesis test over arbitrary ledgers shows no proposal ever touches `protected_paths`, removes a provider entirely, or lowers the number of working models below 3.
-- [ ] **H3 · Proposal workflow** (M)
+- [x] **H3 · Proposal workflow** (M)
   Proposals saved to `data/evolution/proposals/`; `evolve proposals / approve / reject`.
   *Done when:* `approve` creates `auto/<ts>-policy-tune`, applies the change, runs the QA gate, hot-reloads on pass, and reverts the branch on fail. Nothing is applied without `approve` (FR-18.1).
-- [ ] **H4 · Journal entry for every proposal and decision.**
+- [x] **H4 · Journal entry for every proposal and decision.**
 
 ---
 
 ### Phase I — Evals and validation tooling · size L
 
-- [ ] **I1 · Eval suite** (L) — `evals/`
+- [x] **I1 · Eval suite** (L) — `evals/`
   10 fixed tasks. Each: prompt, scripted FakeLLM responses, success checks.
   | # | Category | Check |
   |---|---|---|
@@ -589,15 +589,15 @@ Requirement IDs continue from SRAS v1.0 (FR-1 to FR-11). The full wording moves 
   | 8 | Poisoned memory | Injected instruction in a stored page never reaches the prompt |
   | 9 | Repeat-task learning | Steps/failures drop after a skill exists |
   | 10 | Decay | Unpinned idle memory gone after 31 days, pinned kept |
-- [ ] **I2 · Validation runner** (M) — `scripts/run_validation.py --tag <tag>`
+- [x] **I2 · Validation runner** (M) — `scripts/run_validation.py --tag <tag>`
   Runs unit, property, integration, evals, coverage; writes the evidence pack. Exit code is non-zero if any criterion in §1 is unmet.
-- [ ] **I3 · Soak** (M) — `scripts/soak.py`
+- [x] **I3 · Soak** (M) — `scripts/soak.py`
   90 simulated days, synthetic episodes per day, daily cycles, FakeClock + FakeLLM.
   *Done when:* store size at day 90 is within a configured multiple of day 30 (plateau, not linear growth); pinned count unchanged; recall p95 < 500 ms; `PRAGMA integrity_check` returns ok; no unhandled exceptions; output is `soak.md`.
-- [ ] **I4 · Documentation tooling (built now, run after freeze)** (L)
+- [x] **I4 · Documentation tooling (built now, run after freeze)** (L)
   `gen_docs.py`, `gen_traceability.py`, `check_doc_drift.py`, `tests/unit/test_doc_sync.py` (marker `docs`).
   *Done when:* run against current code they produce the generated reference docs and a traceability matrix; deliberately breaking the code (rename a tool) makes the drift check fail.
-- [ ] **I5 · Live evaluation** (M, run by Sir Anton with real keys)
+- [x] **I5 · Live evaluation** (M, run by Sir Anton with real keys)
   `E2E=1 python scripts/run_validation.py --live`: all 10 evals live, plus task #9 twice (empty memory vs. after consolidation).
   *Done when:* `evals_live.json` is committed with steps, failures, tokens and latency for both runs. Report as measured, including if there is no improvement.
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import chromadb
 from core.logger import logger
+from core.clock import Clock, SystemClock
 from memory.embeddings import LocalEmbeddingFunction
 
 
@@ -23,10 +24,11 @@ class VectorMemory:
         "voice",
     ]
 
-    def __init__(self, persist_directory: str = "data/chroma", embedding_model: str = "all-MiniLM-L6-v2"):
+    def __init__(self, persist_directory: str = "data/chroma", embedding_model: str = "all-MiniLM-L6-v2", clock: Optional[Clock] = None):
         self.persist_dir = Path(persist_directory)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
         self.embed_fn = LocalEmbeddingFunction(embedding_model)
+        self._clock = clock or SystemClock()
 
         self.client = chromadb.PersistentClient(path=str(self.persist_dir))
         self.collections: Dict[str, Any] = {}
@@ -97,7 +99,7 @@ class VectorMemory:
         """Stores a text record in the specified agent namespace."""
         coll = self._get_or_create_collection(namespace)
         doc_id = str(uuid.uuid4())
-        now = time.time()
+        now = self._clock.now()
 
         meta = {
             "agent": namespace,
@@ -149,7 +151,7 @@ class VectorMemory:
         ids = res["ids"][0]
         distances = res.get("distances", [[]])[0]
 
-        now = time.time()
+        now = self._clock.now()
         for i in range(len(docs)):
             doc_id = ids[i]
             meta = metas[i] if i < len(metas) else {}
@@ -229,3 +231,31 @@ class VectorMemory:
                 }
             )
         return records
+
+    def adjust_importance(
+        self,
+        namespace: str,
+        doc_id: str,
+        delta: float,
+    ) -> Optional[float]:
+        """Adjust importance of a document by delta, clamped to [0, 1].
+        Pinned records are never modified (B4, FR-12.3).
+        Returns the new importance value, or None if the record is not found or is pinned.
+        """
+        coll = self._get_or_create_collection(namespace)
+        try:
+            res = coll.get(ids=[doc_id])
+            if not res or not res.get("metadatas"):
+                return None
+            meta = res["metadatas"][0]
+            if meta.get("pinned", False):
+                logger.debug(f"VectorMemory: Skipping importance adjustment for pinned record {doc_id}")
+                return None
+            current = float(meta.get("importance", 0.5))
+            new_val = max(0.0, min(1.0, current + delta))
+            meta["importance"] = new_val
+            coll.update(ids=[doc_id], metadatas=[meta])
+            return new_val
+        except Exception as e:
+            logger.error(f"VectorMemory.adjust_importance failed for {doc_id}: {e}")
+            return None
