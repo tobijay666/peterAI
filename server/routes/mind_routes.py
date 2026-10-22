@@ -158,6 +158,18 @@ def _read_event_log(log_path: Path, last_n: int = 500) -> List[Dict[str, Any]]:
 @router.get("/snapshot")
 async def snapshot(user: UserContext = Depends(get_current_user)) -> Dict[str, Any]:
     """Returns the full memory snapshot for the 3-D mind view."""
+    import traceback
+    try:
+        return await _snapshot_impl(user)
+    except Exception as exc:
+        tb = traceback.format_exc()
+        logger.error(f"[mind/snapshot] 500 error: {exc}\n{tb}")
+        # Return error details so the browser can show them (dev mode)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=500, content={"error": str(exc), "traceback": tb})
+
+
+async def _snapshot_impl(user: UserContext) -> Dict[str, Any]:
     peter, _guardrails, _router, _learning = pool.get_or_create(user)
     vector_store = peter.vector
     graph_store  = peter.graph

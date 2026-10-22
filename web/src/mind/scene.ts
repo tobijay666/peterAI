@@ -256,7 +256,8 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
     try {
       const res = await apiFetch('/api/mind/snapshot');
       if (!res.ok) {
-        console.warn('[Mind] snapshot fetch failed:', res.status, res.statusText);
+        const body = await res.text().catch(() => '(no body)');
+        console.error('[Mind] snapshot 500 body:', body);
         return;
       }
       const snap = await res.json();
