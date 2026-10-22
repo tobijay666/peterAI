@@ -169,11 +169,12 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
   const beamMat = new T.LineBasicMaterial({ color: 0x7c9eff, transparent: true, opacity: 0.7 });
 
   function buildPointCloud(pts: MemPoint[]) {
+    console.log('[Mind] buildPointCloud called with', pts.length, 'points, first:', pts[0]);
     // remove old
     if (pointsObj) { scene.remove(pointsObj); pointsObj.geometry.dispose(); }
     clearBeams();
     points = pts;
-    if (!pts.length) return;
+    if (!pts.length) { console.warn('[Mind] no points — skipping'); return; }
 
     const n         = pts.length;
     const positions = new Float32Array(n * 3);
@@ -196,11 +197,11 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
     geo.setAttribute('color',    new T.BufferAttribute(colors, 3));
 
     const mat = new T.PointsMaterial({
-      size: allDemo ? 0.28 : 0.42,
+      size: allDemo ? 0.7 : 0.55,
       vertexColors: true,
       sizeAttenuation: true,
       transparent: true,
-      opacity: allDemo ? 0.38 : 0.92,
+      opacity: allDemo ? 0.75 : 0.95,
     });
 
     pointsObj = new T.Points(geo, mat);
@@ -254,10 +255,16 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
   async function fetchSnapshot() {
     try {
       const res = await apiFetch('/api/mind/snapshot');
-      if (!res.ok) return;
+      if (!res.ok) {
+        console.warn('[Mind] snapshot fetch failed:', res.status, res.statusText);
+        return;
+      }
       const snap = await res.json();
+      console.log('[Mind] snapshot received:', snap.points?.length ?? 0, 'points', snap.points?.[0]);
       buildPointCloud(snap.points ?? []);
-    } catch { /* backend not ready */ }
+    } catch (err) {
+      console.warn('[Mind] snapshot fetch error:', err);
+    }
   }
 
   // ── Click → inspector ─────────────────────────────────────── //
