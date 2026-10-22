@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import chromadb
+from core.events import emit
 from core.logger import logger
 from core.clock import Clock, SystemClock
 from memory.embeddings import LocalEmbeddingFunction
@@ -118,6 +119,7 @@ class VectorMemory:
 
         coll.add(documents=[text], metadatas=[meta], ids=[doc_id])
         logger.debug(f"VectorMemory: Stored record [{doc_id}] in namespace '{namespace}'.")
+        emit("store", namespace=namespace, memory_id=doc_id, kind=kind)
         return doc_id
 
     def recall(
@@ -176,6 +178,8 @@ class VectorMemory:
                 }
             )
 
+        if results:
+            emit("recall", namespace=namespace, memory_ids=[r["id"] for r in results], count=len(results))
         return results
 
     def pin(self, namespace: str, doc_id: str, pinned: bool = True) -> bool:
@@ -220,14 +224,16 @@ class VectorMemory:
         coll = self._get_or_create_collection(namespace)
         if coll.count() == 0:
             return []
-        res = coll.get(include=["documents", "metadatas"])
+        res = coll.get(include=["documents", "metadatas", "embeddings"])
         records = []
+        embeddings = res.get("embeddings") or []
         for i in range(len(res["ids"])):
             records.append(
                 {
                     "id": res["ids"][i],
                     "document": res["documents"][i],
                     "metadata": res["metadatas"][i],
+                    "embedding": list(embeddings[i]) if i < len(embeddings) and embeddings[i] is not None else [],
                 }
             )
         return records
