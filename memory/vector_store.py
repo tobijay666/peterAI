@@ -226,14 +226,21 @@ class VectorMemory:
             return []
         res = coll.get(include=["documents", "metadatas", "embeddings"])
         records = []
-        embeddings = res.get("embeddings") or []
+        # ChromaDB returns embeddings as a numpy array or None — never use
+        # "or []" on it (numpy raises ValueError for multi-element truth test)
+        raw_embeddings = res.get("embeddings")
+        embeddings = raw_embeddings if raw_embeddings is not None else []
         for i in range(len(res["ids"])):
+            try:
+                emb = list(embeddings[i]) if i < len(embeddings) else []
+            except (TypeError, IndexError):
+                emb = []
             records.append(
                 {
                     "id": res["ids"][i],
                     "document": res["documents"][i],
                     "metadata": res["metadatas"][i],
-                    "embedding": list(embeddings[i]) if i < len(embeddings) and embeddings[i] is not None else [],
+                    "embedding": emb,
                 }
             )
         return records
