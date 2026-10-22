@@ -87,12 +87,10 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
   // ── Three.js setup ────────────────────────────────────────── //
   const T = (window as any).THREE as typeof THREE;
 
-  const W = root.clientWidth  || 600;
-  const H = root.clientHeight || 500;
-
+  // Use 1×1 placeholder; ResizeObserver (below) sets the real size after layout
   const renderer = new T.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(W, H);
+  renderer.setSize(1, 1);
   renderer.setClearColor(0x060610, 1);
   renderer.domElement.style.cssText = 'position:absolute;inset:0;width:100%!important;height:100%!important;';
   root.appendChild(renderer.domElement);
@@ -100,7 +98,7 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
   const scene  = new T.Scene();
   scene.fog    = new T.FogExp2(0x060610, 0.018);
 
-  const camera = new T.PerspectiveCamera(60, W / H, 0.1, 200);
+  const camera = new T.PerspectiveCamera(60, 1, 0.1, 200);
   camera.position.set(0, 4, 32);
 
   // Lights
@@ -324,14 +322,17 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
   }
 
   // ── Resize ────────────────────────────────────────────────── //
-  const ro = new ResizeObserver(() => {
+  function onResize() {
     const w = root.clientWidth, h = root.clientHeight;
     if (!w || !h) return;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
-  });
+  }
+  const ro = new ResizeObserver(onResize);
   ro.observe(root);
+  // Force resize on next frame so WebGL backbuffer matches actual DOM size
+  requestAnimationFrame(onResize);
 
   // ── Socket events ─────────────────────────────────────────── //
   socket.onEvent((ev: MindEvent) => {
