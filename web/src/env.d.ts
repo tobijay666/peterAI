@@ -3,8 +3,7 @@
  * that lack complete type definitions.
  */
 
-// Three.js loaded from CDN — available as window.THREE
-declare const THREE: typeof import('three');
+// three.js is bundled by Vite (import * as THREE from 'three'); no CDN global.
 
 
 // d3-force-3d has no @types package; declare enough to satisfy TS

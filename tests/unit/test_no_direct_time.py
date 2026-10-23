@@ -30,7 +30,7 @@ def _find_time_time_calls(root: Path):
 
 def test_no_direct_time_dot_time():
     """No module outside core/clock.py may call time.time() directly."""
-    root = Path("d:/peterAI")
+    root = Path(__file__).resolve().parents[2]  # repo root (was hard-coded d:/peterAI, which scanned nothing)
     violations = _find_time_time_calls(root)
     assert violations == [], (
         f"Found {len(violations)} direct time.time() call(s) outside core/clock.py:\n"

@@ -1,10 +1,12 @@
 """Abstract Base Class for all agents in the fleet."""
 
 import json
+import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 from core.guardrails import GuardrailManager
 from core.interfaces import AgentState, Message
+from core.events import emit
 from core.logger import logger
 from llm.router import LLMRouter
 from memory.graph_store import GraphMemory
@@ -41,10 +43,14 @@ class BaseAgent(ABC):
         self.guardrails = guardrails
         self.tools = tools
         self.state = AgentState.IDLE
+        self._user_id: str = "local"
+        self._context_builder: object = None  # injected by bootstrap_for_user
 
     def run(self, user_input: str, context: Optional[Dict[str, Any]] = None) -> str:
         """Executes the agent tool reasoning loop up to max_steps."""
         self.state = AgentState.RUNNING
+        _turn_id = str(uuid.uuid4())
+        emit("turn_start", user_id=self._user_id, turn_id=_turn_id, agent=self.agent_id)
         logger.info(f"Agent [{self.name}] starting turn with input: '{user_input[:60]}...'")
 
         # Check input guardrail
@@ -64,6 +70,40 @@ class BaseAgent(ABC):
             ctx_str = json.dumps(context)
             messages.append(Message(role="system", content=f"Context information: {ctx_str}"))
 
+        # Phase 3: inject recalled context (memory + skill hints) before planning
+        if self._context_builder is not None:
+            try:
+                from memory.recall import ContextBuilder  # type: ignore
+                rc = self._context_builder.build(user_input, namespace=self.agent_id, turn_id=_turn_id)
+
+                # Cognitive memory (Stages 2–3): a knowledge gap triggers research
+                # before the LLM loop. Sync mode researches now and re-reads memory;
+                # async mode tells the model research is under way.
+                gap_note = self._handle_knowledge_gap(user_input, rc, _turn_id)
+                if gap_note == "researched":
+                    rc = self._context_builder.build(user_input, namespace=self.agent_id,
+                                                     turn_id=_turn_id, count_access=False)
+                    gap_note = None
+
+                if not rc.is_empty():
+                    messages.append(
+                        Message(
+                            role="system",
+                            content=f"[CONTEXT FROM MEMORY]\n{rc.memory_text}",
+                        )
+                    )
+                    if "[KNOWLEDGE" in rc.memory_text:
+                        messages.append(Message(role="system", content=(
+                            "When you use [KNOWLEDGE] items, cite them inline as [n] and end with a short "
+                            "'Sources:' list of the URLs you cited. Do not cite items you did not use.")))
+                    emit("context_injected", user_id=self._user_id, turn_id=_turn_id,
+                         agent=self.agent_id, memory_ids=rc.memory_ids,
+                         skill_hint=rc.skill_hint)
+                if gap_note:
+                    messages.append(Message(role="system", content=gap_note))
+            except Exception as _cb_err:
+                logger.debug(f"ContextBuilder skipped: {_cb_err}")
+
         tool_schemas = self.tools.get_schemas(self.tool_names) if self.tool_names else None
         step_count = 0
 
@@ -71,6 +111,7 @@ class BaseAgent(ABC):
             step_count += 1
             logger.debug(f"Agent [{self.name}] step {step_count}/{self.max_steps}")
 
+            emit("llm_call", user_id=self._user_id, turn_id=_turn_id, agent=self.agent_id, step=step_count)
             try:
                 completion = self.router.complete(
                     messages=messages,
@@ -98,6 +139,7 @@ class BaseAgent(ABC):
             # If no tool calls requested, agent has completed its reasoning
             if not tool_calls:
                 self.state = AgentState.IDLE
+                emit("turn_end", user_id=self._user_id, turn_id=_turn_id, agent=self.agent_id)
                 # Check output guardrail
                 gr_out = self.guardrails.check_output(content)
                 if not gr_out.allowed:
@@ -125,6 +167,7 @@ class BaseAgent(ABC):
                     tool_args = {}
 
                 # Execute tool
+                emit("tool_call", user_id=self._user_id, turn_id=_turn_id, agent=self.agent_id, tool=tool_name)
                 tool_res = self.tools.dispatch(name=tool_name, args=tool_args, caller_agent=self.agent_id)
                 tool_output_str = tool_res.output if tool_res.success else f"Error: {tool_res.error}"
 
@@ -141,3 +184,24 @@ class BaseAgent(ABC):
         msg = f"Agent [{self.name}] reached maximum step limit ({self.max_steps})."
         logger.warning(msg)
         return f"{msg} Partial response: {messages[-1].content if messages else ''}"
+
+    def _handle_knowledge_gap(self, user_input: str, rc: Any, turn_id: str) -> Optional[str]:
+        """Peter only: research missing knowledge. Returns "researched", a note for the model, or None."""
+        cognition = getattr(self._context_builder, "cognition", None)
+        verdict = getattr(rc, "verdict", None)
+        if self.agent_id != "peter" or cognition is None or verdict is None or verdict.sufficient:
+            return None
+        try:
+            outcome = cognition.handle_gap(user_input, rc.graph_result, verdict, turn_id=turn_id)
+        except Exception as e:
+            logger.warning(f"Knowledge-gap handling failed: {e}")
+            return None
+        if outcome.mode == "sync" and outcome.records > 0:
+            return "researched"
+        if outcome.mode == "async":
+            topics = ", ".join(outcome.topics)
+            return (f"[RESEARCH IN PROGRESS] Peter is researching '{topics}' in the background right now. "
+                    "Tell the user briefly that you are looking into it and will follow up with a cited answer. "
+                    "Answer only what you already know; do not invent facts.")
+        return None
+

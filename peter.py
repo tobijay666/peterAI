@@ -36,6 +36,18 @@ from tools.registry import ToolRegistry
 from tts.service import TTSService
 
 
+def build_cognition(vector_store, graph_store, router, guardrails, async_research=None):
+    """Cognitive memory for one user: graph-indexed recall, research, curiosity (Stages 2–4)."""
+    from memory.cognition import CognitiveMemory
+    from engine.research_pipeline import ResearchPipeline
+    from engine.curiosity import CuriosityEngine
+
+    cognition = CognitiveMemory(vector_store, graph_store, router=router, async_research=async_research)
+    cognition.research = ResearchPipeline(cognition.knowledge, router=router, guardrails=guardrails)
+    cognition.curiosity = CuriosityEngine(cognition.knowledge, resolver=cognition.resolver, router=router)
+    return cognition
+
+
 def bootstrap_system():
     """Initializes system subsystems, memory stores, agents, and tool registries."""
     logger.info("Bootstrapping Peter AI System...")
@@ -420,6 +432,12 @@ def bootstrap_system():
     # 7. Instantiate Peter Orchestrator
     peter = PeterAgent(router, vector_store, graph_store, guardrails, registry, specialists=specialists)
 
+    # 7b. Cognitive memory for the REPL: research runs inline (no WebSocket for a follow-up)
+    from memory.recall import ContextBuilder
+    cognition = build_cognition(vector_store, graph_store, router, guardrails, async_research=False)
+    peter.cognition = cognition
+    peter._context_builder = ContextBuilder(vector_store, graph_store, cognition=cognition)
+
     # 8. Async Task Queue & Worker Pool
     num_workers = int(os.getenv("NUM_TASK_WORKERS", "2"))
     task_queue = TaskQueue()
@@ -452,3 +470,163 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------------------
+# Web-mode bootstrap (Phase 1)
+# ---------------------------------------------------------------------------
+
+def bootstrap_for_user(user_ctx):
+    """
+    Creates an isolated Peter instance for one web-authenticated user.
+
+    Called by server.peter_pool for each active user session.  The terminal
+    REPL continues to use bootstrap_system() unchanged.
+
+    FileSystem and DevOps agents are omitted: they must not run on the server
+    because they can read/write the server's own filesystem.
+
+    Returns: (peter, tts_service, guardrails, eviction_scheduler, worker_pool, router)
+    """
+    from core.user_context import UserContext  # local import avoids circular deps
+
+    logger.info(f"[web] Bootstrapping Peter for user '{user_ctx.user_id}'...")
+
+    # Guardrails (shared rules, stateless — safe to reuse across users)
+    guardrails = GuardrailManager("config/guardrails.json")
+
+    # Per-user memory stores
+    vector_store = VectorMemory(
+        persist_directory=str(user_ctx.chroma_dir),
+        embedding_model="all-MiniLM-L6-v2",
+        user_id=user_ctx.user_id,   # memory events reach this user's mind view
+    )
+    graph_store = GraphMemory(database_path=str(user_ctx.graph_db_path), user_id=user_ctx.user_id)
+    init_memory_tools(vector_store, graph_store)
+
+    # LLM router (shared config, per-call state)
+    router = LLMRouter("config/providers.yaml")
+
+    # TTS — no-op on the server; kept so PeterAgent signature is unchanged
+    tts_service = TTSService()
+
+    # Tool registry
+    registry = ToolRegistry(guardrails=guardrails)
+
+    # Register only the safe subset of tools for web mode
+    # (Filesystem and DevOps tools are intentionally excluded)
+    registry.register(
+        "web_search", web_tools.web_search,
+        {"name": "web_search", "description": "Searches the web.",
+         "parameters": {"type": "object", "properties": {
+             "query": {"type": "string"}, "max_results": {"type": "integer", "default": 5}},
+             "required": ["query"]}},
+    )
+    registry.register(
+        "fetch_url", web_tools.fetch_url,
+        {"name": "fetch_url", "description": "Fetches text from a URL.",
+         "parameters": {"type": "object", "properties": {"url": {"type": "string"}},
+                        "required": ["url"]}},
+    )
+    registry.register(
+        "scholarly_search", web_tools.scholarly_search,
+        {"name": "scholarly_search", "description": "Searches academic papers.",
+         "parameters": {"type": "object", "properties": {
+             "query": {"type": "string"}, "max_results": {"type": "integer", "default": 5}},
+             "required": ["query"]}},
+    )
+    registry.register(
+        "memory_recall", memory_tools.memory_recall,
+        {"name": "memory_recall", "description": "Recalls memories by query.",
+         "parameters": {"type": "object", "properties": {
+             "namespace": {"type": "string"}, "query": {"type": "string"},
+             "n_results": {"type": "integer", "default": 5}},
+             "required": ["namespace", "query"]}},
+    )
+    registry.register(
+        "memory_store", memory_tools.memory_store,
+        {"name": "memory_store", "description": "Stores a finding in vector memory.",
+         "parameters": {"type": "object", "properties": {
+             "namespace": {"type": "string"}, "text": {"type": "string"},
+             "importance": {"type": "number", "default": 0.5},
+             "pinned": {"type": "boolean", "default": False},
+             "kind": {"type": "string", "default": "finding"},
+             "tags": {"type": "string", "default": ""}},
+             "required": ["namespace", "text"]}},
+    )
+    registry.register(
+        "memory_pin", memory_tools.memory_pin,
+        {"name": "memory_pin", "description": "Pins or unpins a memory record.",
+         "parameters": {"type": "object", "properties": {
+             "namespace": {"type": "string"}, "doc_id": {"type": "string"},
+             "pinned": {"type": "boolean", "default": True}},
+             "required": ["namespace", "doc_id"]}},
+    )
+    registry.register(
+        "graph_link", memory_tools.graph_link,
+        {"name": "graph_link", "description": "Links two graph nodes.",
+         "parameters": {"type": "object", "properties": {
+             "src_id": {"type": "string"}, "dst_id": {"type": "string"},
+             "relation": {"type": "string"}},
+             "required": ["src_id", "dst_id", "relation"]}},
+    )
+    registry.register(
+        "graph_query", memory_tools.graph_query,
+        {"name": "graph_query", "description": "Queries graph neighbours.",
+         "parameters": {"type": "object", "properties": {
+             "node_id": {"type": "string"}, "max_depth": {"type": "integer", "default": 2}},
+             "required": ["node_id"]}},
+    )
+
+    def tts_speak(text: str) -> ToolResult:
+        tts_service.speak(text)
+        return ToolResult(success=True, output="Speech enqueued.")
+
+    registry.register(
+        "tts_speak", tts_speak,
+        {"name": "tts_speak", "description": "Speaks text.",
+         "parameters": {"type": "object", "properties": {"text": {"type": "string"}},
+                        "required": ["text"]}},
+    )
+
+    # Web-safe specialist fleet (no FileSystem, no DevOps)
+    specialists = {
+        "researcher": ResearcherAgent(router, vector_store, graph_store, guardrails, registry),
+        "librarian":  LibrarianAgent (router, vector_store, graph_store, guardrails, registry),
+        "qa":         QAAgent        (router, vector_store, graph_store, guardrails, registry),
+        "voice":      VoiceAgent     (router, vector_store, graph_store, guardrails, registry),
+    }
+
+    # Peter orchestrator with a customised greeting
+    peter = PeterAgent(router, vector_store, graph_store, guardrails, registry, specialists=specialists)
+    # Override the system prompt to address the user by their display name
+    peter.system_prompt = peter.system_prompt.replace(
+        "You are Peter, the AI assistant for Sir Anton.",
+        f"You are Peter, the AI assistant for {user_ctx.display_name}.",
+    )
+
+    # Phase 3: wire ContextBuilder into all agents (automatic recall before every task)
+    # Cognitive memory: graph-indexed recall, on-demand research, curiosity queue.
+    from memory.recall import ContextBuilder
+    cognition = build_cognition(vector_store, graph_store, router, guardrails, async_research=None)
+    peter.cognition = cognition
+    cb = ContextBuilder(vector_store, graph_store, cognition=cognition)
+    peter._context_builder = cb
+    peter._user_id = user_ctx.user_id
+    for agent in specialists.values():
+        agent._context_builder = cb
+        agent._user_id = user_ctx.user_id
+
+    # Background task queue
+    num_workers = int(os.getenv("NUM_TASK_WORKERS", "2"))
+    task_queue  = TaskQueue()
+    worker_pool = TaskWorkerPool(task_queue=task_queue, specialists=specialists, num_workers=num_workers)
+    peter.set_task_queue(task_queue)
+    worker_pool.start()
+
+    # Eviction scheduler
+    eviction_scheduler = EvictionScheduler(vector_store, graph_store)
+    eviction_scheduler.start()
+
+    logger.info(f"[web] Peter ready for user '{user_ctx.user_id}'.")
+    return peter, tts_service, guardrails, eviction_scheduler, worker_pool, router

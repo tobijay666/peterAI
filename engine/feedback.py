@@ -42,7 +42,7 @@ class FeedbackEngine:
         # Lower importance of cited memories
         memory_ids = self.ledger.get_cited_memory_ids(task_id)
         for mid in memory_ids:
-            for ns in self.vector.DEFAULT_NAMESPACES:
+            for ns in self.vector.list_namespaces():
                 result = self.vector.adjust_importance(ns, mid, self.bad_feedback_delta)
                 if result is not None:
                     logger.debug(f"FeedbackEngine: adjusted importance of {mid} in {ns}: {result}")

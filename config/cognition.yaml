@@ -1,0 +1,75 @@
+# Peter AI — Cognitive memory configuration (entity-routed memory, curiosity, sleep v2, mind view).
+# Every threshold used by the cognitive-memory code lives here; code reads it via core/cognition_config.py.
+
+enabled: true            # false = fall back to the old agent-namespace recall only
+
+usage:
+  half_life_days: 14     # recency decay of the usage score
+  baseline_importance: 0.5
+
+resolver:
+  index_min_similarity: 0.55   # entity-index match floor for semantic lookup
+  max_entities: 3              # entities extracted per query
+  use_llm: true                # LLM entity extraction (falls back to heuristic)
+
+recall:
+  top_k: 6                     # records per matched collection
+  neighbour_weight: 0.6        # score multiplier for 1-hop abstraction/related collections
+  max_neighbours: 3
+  record_fallback_min: 0.45    # no node matched: a record this close in any collection anchors its node
+  record_fallback_max_collections: 64
+
+sufficiency:
+  min_score: 0.30              # hits from the matched collection must reach this similarity
+  min_records: 2               # at least this many hits above min_score
+  use_llm_judge: true          # LLM "can this answer it?" — only asked when evidence is strong
+                               # but some query terms have no node (the ambiguous case)
+
+research:
+  enabled: true
+  max_queries: 3
+  max_pages: 4
+  max_seconds: 25
+  max_claims_per_page: 12
+  min_claim_chars: 25
+  corroboration_similarity: 0.90
+  async_in_chat: true          # D5: reply first, research in the background
+
+curiosity:
+  per_turn: 4                  # questions generated per turn (3–5)
+  dedupe_similarity: 0.85
+  weights:
+    usage: 0.4
+    novelty: 0.3
+    gap: 0.2
+    recency: 0.1
+  max_pending: 200
+
+sleep:
+  idle_minutes: 20             # start a cycle after this much idle time
+  min_hours_between: 6         # ...but not more often than this
+  max_new_collections: 5       # spec cap per cycle (abstractions + background research)
+  research_items_per_cycle: 3
+  prune:
+    percentile_floor: 0.10     # bottom 10% by usage are candidates...
+    score_floor: 0.05          # ...or any node whose raw usage score fell below this
+    window_days: 30            # untouched for at least this long
+    grace_days: 7              # D3: a fading node is pruned no sooner than this
+  abstraction:
+    min_similarity: 0.45       # centroid similarity band for "related but distinct"
+    max_similarity: 0.80
+    migrate_min_similarity: 0.40   # record must be this close to the group centroid to be copied
+    max_records_per_member: 8
+  gaps:
+    min_degree: 2
+    min_records: 3
+    min_confidence: 0.5
+
+visual:
+  tiers:
+    high_percentile: 0.80
+    low_percentile: 0.30
+  high:     {scale_min: 1.6, scale_max: 2.4, emissive_min: 1.5, emissive_max: 3.0, saturation: 1.0, opacity: 1.0}
+  moderate: {scale: 1.0, emissive: 0.4, saturation: 0.85, opacity: 0.95}
+  low:      {scale_min: 0.4, scale_max: 0.7, emissive: 0.05, saturation: 0.25, opacity_min: 0.35, opacity_max: 0.5}
+  fading:   {scale: 0.3, emissive: 0.0, saturation: 0.1, opacity: 0.25}

@@ -1,30 +1,15 @@
 import { defineConfig } from 'vite';
 
+// three.js is bundled (not a CDN global) so the mind view can use
+// three/examples/jsm (OrbitControls, EffectComposer, UnrealBloomPass).
+// A-Frame, which shipped its own copy of three, has been removed.
 export default defineConfig({
   base: '/',
-
-  // Three.js and A-Frame come from CDN globals
-  resolve: {
-    alias: {
-      'three': 'three',
-    },
-  },
-
-  optimizeDeps: {
-    exclude: ['three'],
-  },
 
   build: {
     outDir: 'dist',
     sourcemap: true,
-    rollupOptions: {
-      external: ['three'],
-      output: {
-        globals: {
-          three:  'THREE',
-        },
-      },
-    },
+    chunkSizeWarningLimit: 1200,
   },
 
   server: {

@@ -19,11 +19,13 @@ long research or multi-file tasks.
 """
 
 import re
+import uuid
 from typing import Any, Dict, Optional
 
 from agents.base import BaseAgent
 from core.guardrails import GuardrailManager
 from core.interfaces import ToolResult
+from core.events import emit
 from core.logger import logger
 from engine import task_planner
 from engine.task_queue import TaskQueue, TaskWorkerPool
@@ -187,10 +189,12 @@ class PeterAgent(BaseAgent):
                         )
 
                     logger.info(f"Peter delegating query to [{agent_key}]: '{query[:50]}...'")
+                    emit("delegate", user_id=self._user_id, agent=agent_key, query=query[:80])
 
-                    # Log delegation in Graph Memory
+                    # Log delegation in Graph Memory (unique id per delegation so
+                    # different tasks with similar wording no longer collide)
                     task_id = self.graph.upsert_node(
-                        node_id=f"task_{query[:20].strip()}", kind="task", label=query
+                        node_id=f"task_{uuid.uuid4().hex[:12]}", kind="task", label=query
                     )
                     agent_node_id = self.graph.upsert_node(node_id=agent_key, kind="agent", label=agent_key)
                     self.graph.link(src_id=task_id, dst_id=agent_node_id, relation="spawned_by")

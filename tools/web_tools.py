@@ -132,3 +132,32 @@ def scholarly_search(query: str, max_results: int = 5) -> ToolResult:
         return ToolResult(success=True, output=f"No scholarly articles found across arXiv, Semantic Scholar, or PubMed for '{query}'.")
 
     return ToolResult(success=True, output="\n---\n".join(results))
+
+
+def web_search_results(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+    """Structured web search for the research pipeline: [{"title", "url", "snippet"}].
+
+    Same DuckDuckGo backend as web_search(), but returns data instead of
+    preformatted text. Never raises; returns [] on failure.
+    """
+    try:
+        from duckduckgo_search import DDGS
+
+        with DDGS() as ddgs:
+            raw = list(ddgs.text(query, max_results=max_results))
+        out = []
+        for r in raw:
+            url = r.get("href", r.get("link", ""))
+            if url:
+                out.append({"title": r.get("title", "Untitled"), "url": url,
+                            "snippet": r.get("body", r.get("snippet", ""))})
+        return out
+    except Exception as e:
+        logger.warning(f"web_search_results failed for '{query}': {e}")
+        return []
+
+
+def fetch_text(url: str) -> str:
+    """Plain-text page content for the research pipeline ('' on failure)."""
+    res = fetch_url(url)
+    return res.output if res.success else ""
