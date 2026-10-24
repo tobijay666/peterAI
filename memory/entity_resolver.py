@@ -35,6 +35,10 @@ _STOP = {
     "worn", "wear", "wears", "served", "serve", "cooked", "cook", "ties", "tie", "tied", "meaning",
     "go", "goes", "take", "takes", "come", "comes", "put", "see", "say", "says", "said", "way", "ways",
     "get", "gets", "made", "done", "called", "call", "happening", "today", "really", "exactly",
+    "love", "loves", "loved", "loving", "hate", "hates", "hated", "enjoy", "enjoys", "enjoyed",
+    "prefer", "prefers", "preferred", "feel", "feels", "felt", "feeling", "think", "thinks",
+    "thought", "believe", "believes", "because", "since", "makes", "making", "great", "awesome",
+    "nice", "better",
 }
 
 
@@ -122,9 +126,10 @@ class EntityResolver:
                 res = self.router.complete(
                     messages=[
                         Message(role="system", content=(
-                            "Extract the 1 to 3 main topics or named entities the user's message is about, "
-                            "most important first. Use short canonical noun phrases (e.g. 'henna', "
-                            "'Sri Lankan weddings'). "
+                            "Extract the 1 to 3 core subject-matter topics or domain concepts the user is asking about or discussing, "
+                            "most important first. Use short canonical noun phrases (e.g. 'writing style', 'books'). "
+                            "Do NOT extract personal conversational sentiment verbs or emotions (e.g., do NOT extract 'love', "
+                            "'like', 'opinion', 'preference'). Focus strictly on the underlying subject matter being discussed. "
                             'Reply with JSON only: {"entities": ["..."]}. If there is no topic, reply {"entities": []}.'
                         )),
                         Message(role="user", content=query[:1000]),

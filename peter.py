@@ -608,7 +608,7 @@ def bootstrap_for_user(user_ctx):
     # Phase 3: wire ContextBuilder into all agents (automatic recall before every task)
     # Cognitive memory: graph-indexed recall, on-demand research, curiosity queue.
     from memory.recall import ContextBuilder
-    cognition = build_cognition(vector_store, graph_store, router, guardrails, async_research=None)
+    cognition = build_cognition(vector_store, graph_store, router, guardrails, async_research=False)
     peter.cognition = cognition
     cb = ContextBuilder(vector_store, graph_store, cognition=cognition)
     peter._context_builder = cb

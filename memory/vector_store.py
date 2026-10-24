@@ -302,9 +302,14 @@ class VectorMemory:
 
     def get_all_records(self, namespace: str) -> List[Dict[str, Any]]:
         coll = self._get_or_create_collection(namespace)
-        if coll.count() == 0:
+        try:
+            if coll.count() == 0:
+                return []
+            res = coll.get(include=["documents", "metadatas", "embeddings"])
+        except Exception as e:
+            logger.warning(f"VectorMemory: get_all_records on '{namespace}' failed: {e}")
             return []
-        res = coll.get(include=["documents", "metadatas", "embeddings"])
+
         records = []
         # ChromaDB returns embeddings as a numpy array or None — never use
         # "or []" on it (numpy raises ValueError for multi-element truth test)

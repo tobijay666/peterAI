@@ -104,7 +104,7 @@ class PeterAgent(BaseAgent):
             agent_id="peter",
             name="Peter",
             system_prompt=system_prompt,
-            policy=["nvidia", "groq", "openrouter", "huggingface"],
+            policy=["groq", "openrouter", "nvidia", "huggingface"],
             tool_names=tool_names,
             max_steps=15,
             router=router,

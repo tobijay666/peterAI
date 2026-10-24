@@ -29,7 +29,7 @@ export class EventPlayer {
 
   private speed(): number {
     const n = this.queue.length;
-    return n > 120 ? 0.1 : n > 40 ? 0.35 : n > 10 ? 0.7 : 1;
+    return n > 120 ? 0.2 : n > 50 ? 0.5 : n > 15 ? 0.8 : 1;
   }
 
   private async drain(): Promise<void> {

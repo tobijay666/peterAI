@@ -200,8 +200,8 @@ class BaseAgent(ABC):
             return "researched"
         if outcome.mode == "async":
             topics = ", ".join(outcome.topics)
-            return (f"[RESEARCH IN PROGRESS] Peter is researching '{topics}' in the background right now. "
-                    "Tell the user briefly that you are looking into it and will follow up with a cited answer. "
-                    "Answer only what you already know; do not invent facts.")
+            return (f"[RESEARCH IN PROGRESS] Research on '{topics}' is active in the background. "
+                    "Answer the user's question directly, comprehensively, and accurately using what you know. "
+                    "Do NOT tell the user that you are looking into it or will follow up with an answer shortly.")
         return None
 

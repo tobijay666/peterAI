@@ -245,20 +245,47 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
         if (inspector.nodeId === id) inspector.refresh();
         return 120;
       }
-      case 'gap_detected':
+      case 'gap_detected': {
         setState('researching');
-        say(`Knowledge gap: "${ev['term']}" — researching…`);
-        return 0;
+        const term = String(ev['term'] ?? '');
+        say(`Knowledge gap: "${term}" — researching…`);
+        const protoId = `gap_${term.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+        if (!layer.getNode(protoId)) {
+          layer.upsertNode({
+            id: protoId,
+            kind: 'entity',
+            label: term,
+            style: { tier: 'low', scale: 0.65, emissive: 0.8, saturation: 0.7, opacity: 0.75 },
+            position: nearPos(null, 3.5),
+            collection: null,
+          }, true);
+          updateStats();
+        }
+        return 200;
+      }
       case 'research_step': {
         try { say(`Reading ${new URL(String(ev['url'])).hostname}…`, 1800); } catch { /* ignore */ }
-        return 0;
+        flashCore(0xff9f7c, 0.7);
+        const nid = (ev['node_id'] as string | undefined) ?? (ev['topic_node_id'] as string | undefined);
+        const p = nid ? layer.getPos(nid) : null;
+        if (nid && p) {
+          effects.pulse([new THREE.Vector3(0, 0, 0), p], 0xff9f7c, 400);
+          layer.flash(nid, 0.6);
+        }
+        return 160;
       }
       case 'node_spawned': {
+        const id = ev['node_id'] as string;
+        const label = String(ev['label'] ?? '');
+        const protoId = `gap_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+        if (layer.getNode(protoId) && protoId !== id) {
+          layer.removeNode(protoId, false);
+        }
         const pos = (ev['position'] as [number, number, number] | null) ?? nearPos(null);
-        layer.upsertNode({ id: ev['node_id'] as string, kind: String(ev['kind'] ?? 'entity'), label: String(ev['label'] ?? ''),
+        layer.upsertNode({ id, kind: String(ev['kind'] ?? 'entity'), label,
           style: ev['style'] as NodeStyle, position: pos, collection: (ev['collection'] as string) ?? null }, true);
         updateStats();
-        if (state !== 'sleeping') { const p = layer.getPos(ev['node_id'] as string); if (p) rig.focus(p, 18, 700); }
+        if (state !== 'sleeping') { const p = layer.getPos(id); if (p) rig.focus(p, 18, 700); }
         return 550;
       }
       case 'research_done': {
@@ -282,11 +309,17 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
       case 'curiosity_added': {
         const id = (ev['node_id'] as string) ?? `cur_${ev['id']}`;
         const topic = ev['topic_node_id'] as string | null;
+        const pos = nearPos(topic, 2.2);
         layer.upsertNode({ id, kind: 'curiosity', label: String(ev['question'] ?? ''), style: CURIOSITY_STYLE,
-          position: nearPos(topic) }, true);
-        if (topic) layer.addEdge({ id: `${id}->${topic}`, src: id, dst: topic, relation: 'curious_about' }, true);
+          position: pos }, true);
+        if (topic) {
+          layer.addEdge({ id: `${id}->${topic}`, src: id, dst: topic, relation: 'curious_about' }, true);
+          const topPos = layer.getPos(topic);
+          const curPos = layer.getPos(id);
+          if (topPos && curPos) effects.pulse([topPos, curPos], 0xffe07c, 320);
+        }
         updateStats();
-        return 180;
+        return 240;
       }
       case 'sleep_start':
         closeRecords();

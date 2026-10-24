@@ -2,28 +2,27 @@
 
 Generated automatically from config/providers.yaml.
 
+### Groq
+- `openai/gpt-oss-120b`
+- `qwen/qwen3.8-27b`
+- `openai/gpt-oss-20b`
+- `canopylabs/orpheus-v1-english`
+
+### OpenRouter
+- `google/gemini-2.5-flash`
+- `deepseek/deepseek-r1`
+- `anthropic/claude-3.5-sonnet`
+- `meta-llama/llama-3.3-70b-instruct`
+- `qwen/qwen-2.5-72b-instruct`
+
 ### NVIDIA NIM
+- `nvidia/nemotron-3.5-lightning-30b-a3b`
+- `meta/llama-3.2-11b-vision-instruct`
+- `meta/llama-3.2-90b-vision-instruct`
 - `deepseek-ai/deepseek-v4.1-flash`
 - `z-ai/glm-5-3`
 - `z-ai/glm-5-3-flash`
 - `moonshotai/kimi-k3`
-- `nvidia/nemotron-3.5-lightning-30b-a3b`
-- `meta/llama-3.3-70b-instruct`
-
-### Groq
-- `openai/gpt-oss-120b`
-- `openai/gpt-oss-20b`
-- `qwen/qwen3.8-27b`
-- `canopylabs/orpheus-v1-english`
-- `llama-3.3-70b-versatile`
-- `llama-3.1-8b-instant`
-
-### OpenRouter
-- `meta-llama/llama-3.3-70b-instruct`
-- `deepseek/deepseek-r1`
-- `anthropic/claude-3.5-sonnet`
-- `google/gemini-2.5-flash`
-- `qwen/qwen-2.5-72b-instruct`
 
 ### HuggingFace
 - `meta-llama/Llama-3.3-70B-Instruct`

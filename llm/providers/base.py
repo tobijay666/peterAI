@@ -37,13 +37,18 @@ class BaseProvider(ABC):
         # Updated immediately on failure so the NEXT step skips the dead model,
         # instead of waiting for the 10-minute background health probe cycle.
         self._failed_models: set = set()
-        self._completion_timeout: float = float(os.getenv("COMPLETION_TIMEOUT_SEC", "90"))
+        self._completion_timeout: float = float(os.getenv("COMPLETION_TIMEOUT_SEC", "15"))
         self._init_client()
 
     def _init_client(self) -> None:
         if self.api_key:
             try:
-                self.client = openai.OpenAI(base_url=self.base_url, api_key=self.api_key)
+                self.client = openai.OpenAI(
+                    base_url=self.base_url,
+                    api_key=self.api_key,
+                    timeout=self._completion_timeout,
+                    max_retries=0,
+                )
             except Exception as e:
                 logger.warning(f"Could not initialize OpenAI client for {self.name}: {e}")
                 self.client = None

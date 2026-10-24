@@ -33,7 +33,7 @@ research:
   max_claims_per_page: 12
   min_claim_chars: 25
   corroboration_similarity: 0.90
-  async_in_chat: true          # D5: reply first, research in the background
+  async_in_chat: false          # Answer directly with cited research in chat
 
 curiosity:
   per_turn: 4                  # questions generated per turn (3–5)

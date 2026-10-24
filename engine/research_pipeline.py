@@ -215,8 +215,22 @@ class ResearchPipeline:
         out = ResearchOutcome(topic=topic)
         start = self._monotonic()
         deadline = start + float(self.cfg["max_seconds"])
+
+        # Create or anchor topic node early so live visualization spawns node immediately
+        node = target_node
+        if node is None:
+            try:
+                node, out.created_node = self.knowledge.ensure_node(topic, budget=budget, turn_id=turn_id)
+            except BudgetExceeded:
+                node = self._nearest_existing(topic)
+                if node is None:
+                    out.deferred = True
+                    out.errors.append("collection budget exhausted; research deferred")
+                    return out
+        out.node_id = node["id"]
+
         queries = self.build_queries(topic, question, missing_aspects, include_topic=include_topic)
-        emit("research_start", user_id=self.user_id, turn_id=turn_id, topic=topic, queries=queries)
+        emit("research_start", user_id=self.user_id, turn_id=turn_id, topic=topic, node_id=node["id"], queries=queries)
 
         results: List[Dict[str, str]] = []
         for q in queries:
@@ -243,7 +257,7 @@ class ResearchPipeline:
             if not text:
                 text = page.get("snippet", "")
             status = "ok" if text else "empty"
-            emit("research_step", user_id=self.user_id, turn_id=turn_id, topic=topic, url=url, status=status)
+            emit("research_step", user_id=self.user_id, turn_id=turn_id, topic=topic, node_id=node["id"], url=url, status=status)
             if not text:
                 continue
             out.pages_fetched += 1
@@ -256,21 +270,8 @@ class ResearchPipeline:
 
         merged = self.corroborate(items)
         if not merged:
-            emit("research_done", user_id=self.user_id, turn_id=turn_id, topic=topic, node_id=None, records=0)
+            emit("research_done", user_id=self.user_id, turn_id=turn_id, topic=topic, node_id=node["id"], records=0)
             return out
-
-        # Node + collection (D2: daytime research has no budget; sleep passes one)
-        node = target_node
-        if node is None:
-            try:
-                node, out.created_node = self.knowledge.ensure_node(topic, budget=budget, turn_id=turn_id)
-            except BudgetExceeded:
-                node = self._nearest_existing(topic)
-                if node is None:
-                    out.deferred = True
-                    out.errors.append("collection budget exhausted; research deferred")
-                    return out
-        out.node_id = node["id"]
 
         now = self.knowledge._clock.now()
         for g in merged:
