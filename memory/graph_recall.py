@@ -20,7 +20,7 @@ from memory.graph_store import GraphMemory
 from memory.usage import UsageTracker
 from memory.vector_store import VectorMemory
 
-NEIGHBOUR_RELATIONS = ("abstracts", "related_to", "bridges")
+NEIGHBOUR_RELATIONS = ("abstracts", "related_to", "bridges", "similar_to")
 
 
 @dataclass
@@ -30,6 +30,7 @@ class GraphRecallResult:
     hits: List[Dict[str, Any]] = field(default_factory=list)
     path: List[str] = field(default_factory=list)
     edges: List[str] = field(default_factory=list)
+    route: List[str] = field(default_factory=list)   # stored path subject -> ... -> topic
 
     @property
     def matched_nodes(self) -> List[Dict[str, Any]]:
@@ -46,12 +47,13 @@ class GraphRecallResult:
 
 class GraphRecall:
     def __init__(self, vector: VectorMemory, graph: GraphMemory, resolver: EntityResolver,
-                 usage: UsageTracker, cfg: Optional[Dict[str, Any]] = None) -> None:
+                 usage: UsageTracker, cfg: Optional[Dict[str, Any]] = None, hierarchy: Any = None) -> None:
         self.vector = vector
         self.graph = graph
         self.resolver = resolver
         self.usage = usage
         self._cfg = cfg
+        self.hierarchy = hierarchy   # memory.hierarchy.Hierarchy: Peter -> subject -> topic
 
     @property
     def cfg(self) -> Dict[str, Any]:
@@ -97,6 +99,19 @@ class GraphRecall:
     def recall(self, query: str, turn_id: str = "", resolution: Optional[Resolution] = None,
                emit_events: bool = True, touch: bool = True) -> GraphRecallResult:
         resolution = resolution or self.resolver.resolve(query)
+        route_nodes: List[str] = []
+        route_edges: List[str] = []
+        if not resolution.matched and resolution.terms and self.hierarchy is not None:
+            # No topic by name: walk Peter's tree top-down (subject -> field -> topic) by meaning
+            try:
+                walked = self.hierarchy.descend(query)
+            except Exception as e:
+                logger.debug(f"GraphRecall: tree walk failed: {e}")
+                walked = None
+            if walked is not None:
+                from memory.entity_resolver import Match
+                node, score, route_nodes, route_edges = walked
+                resolution.matched.append(Match(term=query, node=node, via="tree", score=score))
         if not resolution.matched and resolution.terms:
             self._record_fallback(query, resolution)
         result = GraphRecallResult(query=query, resolution=resolution)
@@ -130,8 +145,17 @@ class GraphRecall:
                         by_id[h["id"]] = h
 
         result.hits = sorted(by_id.values(), key=lambda h: (-h["score"], h["id"]))
+        # The stored route Peter took: subject -> ... -> first matched topic. The pulse in
+        # the mind view starts at Peter's core, enters at the subject and follows these edges.
+        if not route_nodes and result.path and self.hierarchy is not None:
+            try:
+                route_nodes, route_edges = self.hierarchy.route_to(result.path[0])
+            except Exception:
+                route_nodes, route_edges = [], []
+        result.route = route_nodes
         if emit_events:
+            path = route_nodes + [n for n in result.path if n not in route_nodes]
             emit("traverse", user_id=self.graph.user_id, turn_id=turn_id, query=query[:120],
-                 path=result.path, edges=result.edges, memory_ids=[h["id"] for h in result.hits],
+                 path=path, edges=route_edges + result.edges, memory_ids=[h["id"] for h in result.hits],
                  unmatched=resolution.unmatched)
         return result

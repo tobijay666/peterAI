@@ -14,6 +14,8 @@ VALID_NODE_KINDS = {
     "task", "agent", "artifact", "skill", "finding", "episode", "semantic",
     # Cognitive memory (schema v3)
     "entity", "abstraction", "source", "curiosity",
+    # Peter himself: the root every main subject hangs off (memory/hierarchy.py)
+    "self",
 }
 VALID_RELATIONS = {
     "produced", "used", "delegated_to", "depends_on",
@@ -25,6 +27,10 @@ VALID_RELATIONS = {
     # Cognitive memory (schema v3)
     "has_collection", "abstracts", "bridges", "cites", "supports",
     "curious_about", "related_to",
+    # Hierarchy (memory/hierarchy.py)
+    "has_subject",   # Peter -> main subject
+    "helper_of",     # helper agent -> Peter (plumbing, never drawn)
+    "similar_to",    # topic <-> topic close in meaning (stored when a topic is created)
 }
 
 # Columns added to `nodes` in schema v3 (name -> SQL type/default)

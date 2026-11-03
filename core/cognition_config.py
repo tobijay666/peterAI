@@ -20,13 +20,16 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "cognition.yam
 DEFAULTS: Dict[str, Any] = {
     "enabled": True,
     "usage": {"half_life_days": 14, "baseline_importance": 0.5},
-    "resolver": {"index_min_similarity": 0.55, "max_entities": 3, "use_llm": True},
+    "resolver": {"index_min_similarity": 0.55, "max_entities": 3, "use_llm": True,
+                 "llm_max_tokens": 700, "link_category": True},
     "recall": {"top_k": 6, "neighbour_weight": 0.6, "max_neighbours": 3,
-               "record_fallback_min": 0.45, "record_fallback_max_collections": 64},
+               "record_fallback_min": 0.45, "record_fallback_max_collections": 64,
+               "tree_walk_min": 0.4, "similar_link_min": 0.6, "similar_link_max": 3},
     "sufficiency": {"min_score": 0.30, "min_records": 2, "use_llm_judge": True},
     "research": {
         "enabled": True, "max_queries": 3, "max_pages": 4, "max_seconds": 25,
         "max_claims_per_page": 12, "min_claim_chars": 25,
+        "min_result_relevance": 0.5, "min_page_relevance": 0.5,
         "corroboration_similarity": 0.90, "async_in_chat": True,
     },
     "curiosity": {
@@ -45,6 +48,7 @@ DEFAULTS: Dict[str, Any] = {
         "gaps": {"min_degree": 2, "min_records": 3, "min_confidence": 0.5},
     },
     "visual": {
+        "layout": "cluster",
         "tiers": {"high_percentile": 0.80, "low_percentile": 0.30},
         "high": {"scale_min": 1.6, "scale_max": 2.4, "emissive_min": 1.5, "emissive_max": 3.0,
                  "saturation": 1.0, "opacity": 1.0},

@@ -11,6 +11,8 @@ resolver:
   index_min_similarity: 0.55   # entity-index match floor for semantic lookup
   max_entities: 3              # entities extracted per query
   use_llm: true                # LLM entity extraction (falls back to heuristic)
+  llm_max_tokens: 700          # reasoning models think before the JSON; too small = empty reply
+  link_category: true          # attach each topic to a field hub ("Victorian literature")
 
 recall:
   top_k: 6                     # records per matched collection
@@ -18,6 +20,9 @@ recall:
   max_neighbours: 3
   record_fallback_min: 0.45    # no node matched: a record this close in any collection anchors its node
   record_fallback_max_collections: 64
+  tree_walk_min: 0.4           # no topic by name: walk Peter -> subject -> topic while matches stay this close
+  similar_link_min: 0.6        # new topic: store similar_to links to existing topics at least this close
+  similar_link_max: 3
 
 sufficiency:
   min_score: 0.30              # hits from the matched collection must reach this similarity
@@ -31,6 +36,8 @@ research:
   max_pages: 4
   max_seconds: 25
   max_claims_per_page: 12
+  min_result_relevance: 0.5    # share of the topic's words a search result must mention
+  min_page_relevance: 0.5      # ...and the fetched page text
   min_claim_chars: 25
   corroboration_similarity: 0.90
   async_in_chat: false          # Answer directly with cited research in chat
@@ -66,6 +73,7 @@ sleep:
     min_confidence: 0.5
 
 visual:
+  layout: cluster              # "cluster": 3-D tree, similar topics close together; "tree": flat top-down tree; "semantic": meaning only
   tiers:
     high_percentile: 0.80
     low_percentile: 0.30

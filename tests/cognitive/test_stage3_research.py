@@ -35,7 +35,7 @@ def cog(stores):
 def test_query_building_and_page_picking(cog):
     rp = cog.research
     qs = rp.build_queries("henna", "is black henna safe?", ["safety"])
-    assert qs == ["henna", "henna safety", "is black henna safe?"]
+    assert qs == ["henna safety", "is black henna safe?", "henna"]   # most specific first
     results = [{"url": "https://a.example/1"}, {"url": "https://a.example/2"}, {"url": "https://www.b.example/x"},
                {"url": "https://c.example/y"}, {"url": "https://d.example/z"}, {"url": "https://e.example/q"}]
     picked = rp.pick_pages(results)

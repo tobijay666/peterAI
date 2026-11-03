@@ -198,6 +198,9 @@ class PeterAgent(BaseAgent):
                     )
                     agent_node_id = self.graph.upsert_node(node_id=agent_key, kind="agent", label=agent_key)
                     self.graph.link(src_id=task_id, dst_id=agent_node_id, relation="spawned_by")
+                    # Helpers hang under Peter's own node (plumbing; the mind view never draws them)
+                    from memory.hierarchy import link_helper
+                    link_helper(self.graph, agent_node_id)
 
                     # Run specialist agent
                     res_text = target_agent.run(user_input=query, context={"context": context} if context else None)
@@ -216,7 +219,9 @@ class PeterAgent(BaseAgent):
                             "description": f"Clear query or instructions for the {spec_name} specialist.",
                         },
                         "context": {
-                            "type": "string",
+                            # nullable: models often send "context": null, which strict
+                            # providers (Groq) reject against a plain "string" schema
+                            "type": ["string", "null"],
                             "description": "Optional context details or prior task outputs.",
                         },
                     },

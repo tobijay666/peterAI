@@ -12,7 +12,10 @@ from core.logger import logger
 def web_search(query: str, max_results: int = 5) -> ToolResult:
     """Performs web search using DuckDuckGo HTML search."""
     try:
-        from duckduckgo_search import DDGS
+        try:
+            from ddgs import DDGS  # maintained successor of duckduckgo_search
+        except ImportError:
+            from duckduckgo_search import DDGS
 
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
@@ -141,7 +144,10 @@ def web_search_results(query: str, max_results: int = 5) -> List[Dict[str, str]]
     preformatted text. Never raises; returns [] on failure.
     """
     try:
-        from duckduckgo_search import DDGS
+        try:
+            from ddgs import DDGS  # maintained successor of duckduckgo_search
+        except ImportError:
+            from duckduckgo_search import DDGS
 
         with DDGS() as ddgs:
             raw = list(ddgs.text(query, max_results=max_results))

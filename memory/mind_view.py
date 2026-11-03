@@ -14,9 +14,12 @@ import json
 import math
 from typing import Any, Dict, List, Optional
 
+from core.cognition_config import cognition_config
 from memory.visual_style import visual_style
 
-GRAPH_KINDS = ["entity", "abstraction", "curiosity", "skill", "agent"]
+# Agent nodes (researcher, librarian…) are plumbing, not knowledge: not drawn
+GRAPH_KINDS = ["entity", "abstraction", "curiosity", "skill"]
+from memory.hierarchy import HELPER_NAMES as _AGENT_NAMES  # noqa: E402  (helpers are plumbing)
 
 # Fixed looks for nodes that are not usage-weighted
 FIXED_STYLES = {
@@ -33,7 +36,11 @@ def _style_for(node: Dict[str, Any], pct: Dict[str, float]) -> Dict[str, Any]:
     return dict(FIXED_STYLES.get(node["kind"], FIXED_STYLES["skill"]))
 
 
-def graph_snapshot(cognition: Any, include_sources: bool = False) -> Dict[str, Any]:
+def graph_snapshot(cognition: Any, include_sources: bool = False,
+                   layout_mode: Optional[str] = None) -> Dict[str, Any]:
+    """layout_mode: "cluster" (3-D tree arranged by similarity, default), "tree" (flat
+    top-down tree diagrams) or "semantic" (meaning only, no hierarchy);
+    default from config visual.layout."""
     graph = cognition.graph
     kinds = GRAPH_KINDS + (["source"] if include_sources else [])
     nodes = [n for n in graph.all_nodes(kinds) if n.get("status") != "pruned"]
@@ -41,11 +48,32 @@ def graph_snapshot(cognition: Any, include_sources: bool = False) -> Dict[str, A
     pct = {k: v["percentile"] for k, v in scored.items()}
     colls = {c["name"]: c for c in graph.list_collections()}
     layout = getattr(cognition, "layout", None)
+    mode = layout_mode or cognition_config()["visual"].get("layout", "cluster")
+    # Helper agents (researcher, librarian…) are plumbing, never drawn even as a topic node
+    nodes = [n for n in nodes if (n.get("label") or "").strip().lower() not in _AGENT_NAMES]
+    from memory.tree_layout import core_subjects, tree_positions
+    all_edges = graph.list_edges([n["id"] for n in nodes])
+    # Main subjects = stored Peter --has_subject--> edges (memory/hierarchy.py), in layout order
+    from memory.hierarchy import SELF_ID
+    stored = {e["dst"] for e in graph.edges_of(SELF_ID) if e["relation"] == "has_subject" and e["src"] == SELF_ID}
+    core_links: List[str] = [i for i in core_subjects(nodes, all_edges) if i in stored]
+    if mode == "tree":
+        tree_pos = tree_positions(nodes, all_edges)
+    elif mode == "cluster":
+        # 3-D: the tree hierarchy, with similar meanings placed close together
+        from memory.tree_layout import cluster_positions
+        semantic = {n["id"]: layout.place(n) for n in nodes} if layout is not None else {}
+        tree_pos = cluster_positions(nodes, all_edges, semantic)
+    else:
+        tree_pos = {}
 
     out_nodes: List[Dict[str, Any]] = []
     for n in nodes:
         style = _style_for(n, pct)
-        pos = layout.place(n) if layout is not None else (0.0, 0.0, 0.0)
+        if mode in ("tree", "cluster"):
+            pos = tree_pos.get(n["id"], (0.0, 0.0, 0.0))
+        else:
+            pos = layout.place(n) if layout is not None else (0.0, 0.0, 0.0)
         coll = colls.get(n.get("collection") or "")
         out_nodes.append({
             "id": n["id"], "kind": n["kind"], "label": (n.get("label") or "")[:120],
@@ -66,6 +94,8 @@ def graph_snapshot(cognition: Any, include_sources: bool = False) -> Dict[str, A
     for n in out_nodes:
         by_kind[n["kind"]] = by_kind.get(n["kind"], 0) + 1
     return {
+        "layout": mode,
+        "core_links": core_links,   # main subjects, drawn as lines from Peter's core
         "nodes": out_nodes,
         "edges": edges,
         "stats": {"nodes": len(out_nodes), "edges": len(edges), "by_kind": by_kind,

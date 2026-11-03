@@ -142,7 +142,7 @@ class CuriosityEngine:
                             f"Peter answered: {reply[:800]}"
                         )),
                     ],
-                    temperature=0.7, max_tokens=300,
+                    temperature=0.7, max_tokens=1200,
                 )
                 qs = [_BULLET.sub("", l).strip() for l in (res.get("content") or "").splitlines()]
                 qs = [q for q in qs if q.endswith("?") and len(q) > 10]

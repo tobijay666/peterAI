@@ -36,6 +36,8 @@ export interface GraphEdge {
 
 export interface GraphSnapshot {
   view: 'graph';
+  layout?: 'tree' | 'cluster' | 'semantic';
+  core_links?: string[];   // main subjects linked straight to Peter's core
   nodes: GraphNode[];
   edges: GraphEdge[];
   stats: { nodes: number; edges: number; by_kind: Record<string, number>; collections: number };

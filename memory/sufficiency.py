@@ -77,7 +77,7 @@ class SufficiencyChecker:
                     )),
                     Message(role="user", content=f"QUESTION: {query}\n\nCONTEXT:\n{context}"),
                 ],
-                temperature=0.0, max_tokens=120,
+                temperature=0.0, max_tokens=800,
             )
             m = re.search(r"\{.*\}", res.get("content", ""), re.DOTALL)
             data = json.loads(m.group(0)) if m else {}

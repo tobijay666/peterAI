@@ -1,5 +1,6 @@
 """Base LLM Provider interface using OpenAI-compatible protocol."""
 
+import re
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
@@ -7,6 +8,26 @@ import openai
 from core.interfaces import Message
 from core.logger import logger
 
+
+
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+
+def _strip_thinking(text: str) -> str:
+    """Remove <think>...</think> blocks (and an unterminated leading one)."""
+    text = _THINK_RE.sub("", text or "")
+    if text.lstrip().startswith("<think>"):
+        return ""
+    return text
+
+
+def _is_request_specific_error(e: Exception) -> bool:
+    """A 400 caused by this request's content (e.g. the model emitted a tool call that failed
+    schema validation) says nothing about the model's health."""
+    msg = str(e).lower()
+    status = getattr(e, "status_code", None)
+    return (status == 400 or "error code: 400" in msg) and any(
+        k in msg for k in ("tool_use_failed", "tool call validation", "invalid_request_error", "failed_generation"))
 
 class ProviderError(Exception):
     """Raised when provider call fails."""
@@ -188,7 +209,8 @@ class BaseProvider(ABC):
                 result = {
                     "provider": self.name,
                     "model": model,
-                    "content": msg_obj.content or "",
+                    # Some reasoning models (e.g. Qwen3) put their thinking inside the reply
+                    "content": _strip_thinking(msg_obj.content or ""),
                     "role": msg_obj.role,
                     "tool_calls": tool_calls_dict,
                     "rate_limits": rate_limits,
@@ -205,8 +227,13 @@ class BaseProvider(ABC):
 
             except Exception as e:
                 logger.warning(f"Model {model} failed on provider {self.name}: {e}")
-                # Immediately blacklist so the NEXT step skips this model
-                self.mark_model_failed(model)
+                if _is_request_specific_error(e):
+                    # The model produced one bad tool call / the request was rejected:
+                    # try the next model for THIS call, but keep the model for later calls.
+                    logger.info(f"[{self.name}] '{model}' rejected this request only; not blacklisting.")
+                else:
+                    # Timeouts, outages, missing models, auth: skip it for the rest of the session
+                    self.mark_model_failed(model)
                 last_exception = e
                 continue
 

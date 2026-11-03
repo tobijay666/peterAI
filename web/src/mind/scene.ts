@@ -32,6 +32,8 @@ import type { GraphEdge, GraphSnapshot, NodeStyle } from './types';
 const AWAKE_BG = new THREE.Color(0x060610);
 const SLEEP_BG = new THREE.Color(0x040a24);
 const CURIOSITY_STYLE: NodeStyle = { tier: 'curiosity', scale: 0.35, emissive: 0.25, saturation: 0.6, opacity: 0.45 };
+const SHOWN_KINDS = new Set(['entity', 'abstraction', 'curiosity', 'skill']);
+const AGENT_NAMES = new Set(['researcher', 'librarian', 'qa', 'voice', 'filesystem', 'devops']);
 const AGENT_HEX: Record<string, number> = {
   peter: 0x7c9eff, researcher: 0xff9f7c, librarian: 0xa8ff7c, filesystem: 0xffe07c,
   devops: 0xe07cff, qa: 0x7cefff, voice: 0xff7cca,
@@ -100,6 +102,30 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
   const core = new THREE.Mesh(new THREE.SphereGeometry(0.6, 32, 24), coreMat);
   scene.add(core);
   let coreFlash = 0;
+
+  // Lines from Peter's core to each main subject ("Writing", "Investing"); the
+  // topics then hang below their subject. Updated every frame so they follow nodes.
+  let coreLinks: string[] = [];
+  const MAX_CORE_LINKS = 64;
+  const coreLinkPos = new Float32Array(MAX_CORE_LINKS * 6);
+  const coreLinkGeo = new THREE.BufferGeometry();
+  coreLinkGeo.setAttribute('position', new THREE.BufferAttribute(coreLinkPos, 3));
+  coreLinkGeo.setDrawRange(0, 0);
+  const coreLinkLines = new THREE.LineSegments(coreLinkGeo, new THREE.LineBasicMaterial({
+    color: new THREE.Color(0x7c9eff).multiplyScalar(1.1), transparent: true, opacity: 0.75, toneMapped: false }));
+  coreLinkLines.frustumCulled = false;
+  scene.add(coreLinkLines);
+  function updateCoreLinks(): void {
+    let k = 0;
+    for (const id of coreLinks) {
+      const p = layer.getPos(id);
+      if (!p || k >= MAX_CORE_LINKS) continue;
+      coreLinkPos.set([0, 0, 0, p.x, p.y, p.z], k * 6);
+      k++;
+    }
+    coreLinkGeo.setDrawRange(0, k * 2);
+    (coreLinkGeo.attributes['position'] as THREE.BufferAttribute).needsUpdate = true;
+  }
   const coreBase = new THREE.Color(0x7c9eff).multiplyScalar(1.3);
   const coreFlashColor = new THREE.Color();
 
@@ -148,6 +174,20 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
   function flashCore(hex: number, amount = 1): void { coreFlashColor.setHex(hex).multiplyScalar(1.6); coreFlash = amount; }
 
   // ── data ─────────────────────────────────────────────────── //
+  // "tree": connected topics as top-down tree diagrams (server-computed positions).
+  // In tree mode the layout depends on the whole graph, so structural events
+  // trigger a debounced re-fetch and nodes glide to their new places.
+  let layoutMode = 'tree';
+  // tree (flat diagrams) and cluster (3-D, similar topics close) are laid out by the server
+  function serverLaid(): boolean { return layoutMode === 'tree' || layoutMode === 'cluster'; }
+  let firstFit = true;
+  let relayoutTimer = 0;
+  function scheduleRelayout(ms = 900): void {
+    if (!serverLaid()) return;
+    window.clearTimeout(relayoutTimer);
+    relayoutTimer = window.setTimeout(() => void fetchSnapshot(), ms);
+  }
+
   async function fetchSnapshot(): Promise<void> {
     try {
       const res = await apiFetch('/api/mind/snapshot?view=graph');
@@ -159,6 +199,13 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
         return;
       }
       layer.setSnapshot(snap as GraphSnapshot);
+      layoutMode = snap.layout ?? 'semantic';
+      coreLinks = serverLaid() && Array.isArray(snap.core_links) ? snap.core_links : [];
+      // flat tree: re-frame on every change; 3-D cluster: frame once, then leave the camera to the user
+      if (serverLaid() && (layoutMode === 'tree' || firstFit)) {
+        rig.fitTo((snap as GraphSnapshot).nodes.map(n => n.position), firstFit ? 0 : 900, layoutMode === 'tree');
+        firstFit = false;
+      }
       updateStats();
     } catch (err) {
       console.warn('[Mind] snapshot error', err);
@@ -275,23 +322,31 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
         return 160;
       }
       case 'node_spawned': {
+        // Only knowledge is drawn; agents (researcher, librarian…) and tasks are plumbing
+        if (!SHOWN_KINDS.has(String(ev['kind'] ?? 'entity'))) return 0;
+        // Helper agents (researcher, librarian…) are plumbing: never drawn, even as a topic node
+        if (AGENT_NAMES.has(String(ev['label'] ?? '').trim().toLowerCase())) return 0;
         const id = ev['node_id'] as string;
         const label = String(ev['label'] ?? '');
         const protoId = `gap_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
         if (layer.getNode(protoId) && protoId !== id) {
           layer.removeNode(protoId, false);
         }
-        const pos = (ev['position'] as [number, number, number] | null) ?? nearPos(null);
+        // Tree mode: the node grows out of Peter's core, then the re-layout moves it into its tree
+        const pos = serverLaid() ? [0, -2, 0] as [number, number, number]
+          : (ev['position'] as [number, number, number] | null) ?? nearPos(null);
         layer.upsertNode({ id, kind: String(ev['kind'] ?? 'entity'), label,
           style: ev['style'] as NodeStyle, position: pos, collection: (ev['collection'] as string) ?? null }, true);
         updateStats();
-        if (state !== 'sleeping') { const p = layer.getPos(id); if (p) rig.focus(p, 18, 700); }
+        scheduleRelayout();
+        if (state !== 'sleeping' && !serverLaid()) { const p = layer.getPos(id); if (p) rig.focus(p, 18, 700); }
         return 550;
       }
       case 'research_done': {
         const id = ev['node_id'] as string | null;
         if (id) {
-          if (ev['position']) layer.moveNode(id, ev['position'] as [number, number, number]);
+          if (ev['position'] && !serverLaid()) layer.moveNode(id, ev['position'] as [number, number, number]);
+          scheduleRelayout(300);
           if (ev['style']) layer.updateStyle(id, ev['style'] as NodeStyle);
           layer.flash(id, 1);
           say(`Learned ${ev['records']} facts about "${ev['topic']}"`);
@@ -304,6 +359,7 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
           relation: ev['relation'] as string };
         if (!layer.getPos(e.src) || !layer.getPos(e.dst)) return 0;   // e.g. source nodes are not drawn
         layer.addEdge(e, true);
+        scheduleRelayout();
         return 260;
       }
       case 'curiosity_added': {
@@ -319,6 +375,7 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
           if (topPos && curPos) effects.pulse([topPos, curPos], 0xffe07c, 320);
         }
         updateStats();
+        scheduleRelayout();
         return 240;
       }
       case 'sleep_start':
@@ -343,9 +400,11 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
         layer.removeNode(id, true);
         if (inspector.nodeId === id) inspector.hide();
         window.setTimeout(updateStats, 1000);
+        scheduleRelayout(1100);
         return 950;
       }
       case 'layout_updated': {
+        if (serverLaid()) { scheduleRelayout(); return 0; }
         for (const m of (ev['moves'] as Array<{ node_id: string; position: [number, number, number] }>) ?? []) {
           layer.moveNode(m.node_id, m.position);
         }
@@ -451,6 +510,7 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
     coreFlash = Math.max(0, coreFlash - dt * 1.5);
     if (state === 'thinking' || state === 'researching') core.rotation.y += dt * 2;
     layer.update(dt);
+    updateCoreLinks();
     effects.update(dt);
     rig.update(dt);
     labels.update(layer, rig.camera, w, h);

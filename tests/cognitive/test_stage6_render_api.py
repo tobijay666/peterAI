@@ -66,19 +66,19 @@ def test_fading_is_never_brighter_than_low(p):
 # ---------------------------------------------------------------- layout
 
 def test_positions_are_stable_and_new_nodes_do_not_reshuffle(cog):
-    first = {n["id"]: n["position"] for n in graph_snapshot(cog)["nodes"]}
-    again = {n["id"]: n["position"] for n in graph_snapshot(cog)["nodes"]}
+    first = {n["id"]: n["position"] for n in graph_snapshot(cog, layout_mode="semantic")["nodes"]}
+    again = {n["id"]: n["position"] for n in graph_snapshot(cog, layout_mode="semantic")["nodes"]}
     assert first == again
     node, _ = cog.knowledge.ensure_node("Poruwa")
     cog.knowledge.add_record(node, "The poruwa ceremony is a Sri Lankan wedding ritual")
-    after = {n["id"]: n["position"] for n in graph_snapshot(cog)["nodes"]}
+    after = {n["id"]: n["position"] for n in graph_snapshot(cog, layout_mode="semantic")["nodes"]}
     for nid, pos in first.items():
         assert after[nid] == pos
     assert "ent_poruwa" in after
 
 
 def test_similar_topics_sit_closer_than_unrelated(cog):
-    pos = {n["id"]: n["position"] for n in graph_snapshot(cog)["nodes"]}
+    pos = {n["id"]: n["position"] for n in graph_snapshot(cog, layout_mode="semantic")["nodes"]}
 
     def d(a, b):
         return sum((x - y) ** 2 for x, y in zip(pos[a], pos[b])) ** 0.5
@@ -87,7 +87,7 @@ def test_similar_topics_sit_closer_than_unrelated(cog):
 
 
 def test_refit_moves_are_emitted(cog, events):
-    graph_snapshot(cog)
+    graph_snapshot(cog, layout_mode="semantic")
     moves = cog.layout.refit()
     assert {m["node_id"] for m in moves} == {"ent_henna", "ent_saree", "ent_invoices"}
 
@@ -98,7 +98,7 @@ def test_graph_snapshot_shape(cog):
     cog.curiosity.generate("what is henna?", "")
     for _ in range(5):
         cog.usage.touch("ent_henna")
-    snap = graph_snapshot(cog)
+    snap = graph_snapshot(cog, layout_mode="semantic")
     nodes = {n["id"]: n for n in snap["nodes"]}
     assert nodes["ent_henna"]["tier"] == "high" and nodes["ent_henna"]["access_count"] == 6
     assert nodes["ent_henna"]["style"]["scale"] > nodes["ent_invoices"]["style"]["scale"]

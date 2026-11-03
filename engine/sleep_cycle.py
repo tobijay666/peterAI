@@ -272,7 +272,7 @@ class SleepCycle:
                         )),
                         Message(role="user", content=", ".join(labels)),
                     ],
-                    temperature=0.2, max_tokens=16,
+                    temperature=0.2, max_tokens=600,
                 )
                 name = (res.get("content") or "").strip().strip('."\'').splitlines()[0][:60] if res.get("content") else ""
                 if name and 1 <= len(name.split()) <= 6:
@@ -397,12 +397,30 @@ class SleepCycle:
                 continue
             ok = out.records_stored > 0
             curiosity.complete(item["id"], ok=ok)
+            origin = item.get("topic_node_id")
+            if ok and out.node_id and origin and origin != out.node_id and self.graph.get_node(origin):
+                # "Oscar Wilde" researched from a Dorian Gray question -> related_to edge
+                self.knowledge.link(out.node_id, origin, "related_to")
+            if ok and out.node_id and getattr(self.cog, "hierarchy", None) is not None:
+                # now that it has facts, link it to topics close in meaning
+                try:
+                    n = self.graph.get_node(out.node_id)
+                    if n:
+                        self.cog.hierarchy.link_similar(n)
+                except Exception as e:
+                    self.report.errors.append(f"link_similar: {e}")
             if out.created_node and out.node_id:
                 node = self.graph.get_node(out.node_id)
                 if node and node.get("collection"):
                     self.report.collections_created.append(node["collection"])
             self.report.researched.append({"question": item["question"], "topic": topic, "node_id": out.node_id,
                                            "records": out.records_stored, "deferred": out.deferred})
+        # Whatever sleep learned must hang under a main subject linked to Peter
+        if not self.dry_run and hasattr(self.cog, "attach_orphans"):
+            try:
+                self.cog.attach_orphans()
+            except Exception as e:
+                self.report.errors.append(f"attach_orphans: {e}")
 
     # ================================================================== layout
 

@@ -32,6 +32,7 @@ class KnowledgeStore:
         self._clock = clock or graph._clock
         self.usage = usage or UsageTracker(graph, clock=self._clock)
         self.layout = None  # LayoutEngine, attached by CognitiveMemory
+        self.on_created = None  # callback(node, turn_id) after a node is created (similarity links)
 
     def position_of(self, node: Dict[str, Any]) -> Optional[List[float]]:
         if self.layout is None:
@@ -113,6 +114,11 @@ class KnowledgeStore:
              label=label, collection=namespace, style=style, usage_score=round(score, 4),
              position=self.position_of(node))
         logger.info(f"KnowledgeStore: new {kind} node '{label}' -> {namespace}")
+        if self.on_created is not None:
+            try:
+                self.on_created(node, turn_id)
+            except Exception as e:
+                logger.debug(f"KnowledgeStore: on_created hook failed for {node_id}: {e}")
         return node, True
 
     # ------------------------------------------------------------------ records

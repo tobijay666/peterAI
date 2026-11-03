@@ -167,6 +167,7 @@ def _read_event_log(log_path: Path, last_n: int = 500) -> List[Dict[str, Any]]:
 
 @router.get("/snapshot")
 async def snapshot(view: str = "graph", sources: bool = False, ns: Optional[str] = None,
+                   layout: Optional[str] = None,
                    user: UserContext = Depends(get_current_user)) -> Dict[str, Any]:
     """Returns the memory snapshot for the 3-D mind view (graph web or record cloud)."""
     import traceback
@@ -176,7 +177,8 @@ async def snapshot(view: str = "graph", sources: bool = False, ns: Optional[str]
             cognition = getattr(peter, "cognition", None)
             if cognition is not None:
                 from memory.mind_view import graph_snapshot
-                return {"user_id": user.user_id, "view": "graph", **graph_snapshot(cognition, include_sources=sources)}
+                return {"user_id": user.user_id, "view": "graph", **graph_snapshot(cognition, include_sources=sources,
+                                                                    layout_mode=layout if layout in ("tree", "cluster", "semantic") else None)}
         return await _snapshot_impl(user, ns=ns)
     except Exception as exc:
         tb = traceback.format_exc()
