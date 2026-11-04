@@ -43,6 +43,11 @@ data/chroma/
 data/peter_graph.db
 data/fs_audit.log
 data/layout.json
+data/events.jsonl
+data/*.jsonl
+data/evolution/
+data/snapshots/
+data/users/
 workspace/
 Peter_AI.txt
 test_results.txt

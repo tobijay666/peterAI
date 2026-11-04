@@ -56,6 +56,20 @@ def ensure_self(graph: Any) -> str:
     return SELF_ID
 
 
+def ensure_primary(graph: Any, node_id: str) -> None:
+    """Exactly one incoming 'abstracts' edge of a node is primary (the oldest, if none is)."""
+    ups = [e for e in graph.edges_of(node_id) if e["relation"] == "abstracts" and e["dst"] == node_id]
+    if not ups:
+        return
+    ups.sort(key=lambda e: (e.get("created_at") or 0.0, e["id"]))
+    prim = [e for e in ups if (e.get("data") or {}).get("primary")]
+    keep = prim[0] if prim else ups[0]
+    if not prim:
+        graph.update_edge_data(keep["id"], primary=True)
+    for e in prim[1:]:
+        graph.update_edge_data(e["id"], primary=None)
+
+
 def link_helper(graph: Any, agent_node_id: str) -> None:
     """Helper agents (researcher, librarian…) hang under Peter as plumbing; the view never draws them."""
     try:
@@ -79,6 +93,7 @@ class Hierarchy:
         self.knowledge = knowledge
         self._centroids: Dict[Tuple[str, int], Optional[List[float]]] = {}
         self._label_vecs: Dict[str, List[float]] = {}
+        self.vgraph: Any = None        # memory.vector_graph.VectorGraph (set by CognitiveMemory)
         try:
             ensure_self(graph)
         except Exception as e:
@@ -91,14 +106,75 @@ class Hierarchy:
     # ------------------------------------------------------------------ structure
 
     def mark_subject(self, node: Dict[str, Any], turn_id: str = "") -> None:
-        """Make node a main subject: role=subject (layout) + has_subject edge from Peter (graph)."""
+        """Make node a main subject: role=subject (layout) + has_subject edge from Peter (graph).
+
+        A main subject sits directly under Peter and never under another node, so any
+        'abstracts' membership it had (it was a field hub under another subject) is removed;
+        its own members keep their place."""
         if not is_subject(node):
             self.graph.upsert_node(node["id"], kind=node.get("kind", "abstraction"), label=node["label"],
-                                   data={**node_data(node), "role": "subject"},
-                                   importance=float(node.get("importance") or 0.5),
-                                   pinned=bool(node.get("pinned")))
+                                   data={**node_data(node), "role": "subject"})
+        for e in self.graph.edges_of(node["id"]):
+            if e["relation"] == "abstracts" and e["dst"] == node["id"]:
+                self.graph.delete_edge(e["id"])
         ensure_self(self.graph)
-        self.graph.link_once(SELF_ID, node["id"], "has_subject")
+        if self.knowledge is not None:
+            self.knowledge.link(SELF_ID, node["id"], "has_subject", turn_id=turn_id)
+        else:
+            self.graph.link_once(SELF_ID, node["id"], "has_subject")
+
+    def ensure_primary(self, node_id: str) -> None:
+        ensure_primary(self.graph, node_id)
+
+    def repair(self) -> int:
+        """Make a stored hierarchy sound (old graphs, hand-made links). Returns changes made:
+          * no 'abstracts' edge into a main subject (or Peter);
+          * no cycle in 'abstracts' (edges replayed oldest first; one that would close a
+            cycle is removed);
+          * every node with hubs above it has exactly one primary parent edge."""
+        changes = 0
+        edges = sorted((e for e in self.graph.list_edges() if e["relation"] == "abstracts"),
+                       key=lambda e: (e.get("created_at") or 0.0, e["id"]))
+        subj = {n["id"] for n in self.graph.all_nodes(TOPIC_KINDS) if is_subject(n)} | {SELF_ID}
+        kids: Dict[str, List[str]] = {}
+
+        def reaches(a: str, b: str) -> bool:
+            seen, stack = {a}, [a]
+            while stack:
+                cur = stack.pop()
+                if cur == b:
+                    return True
+                for k in kids.get(cur, []):
+                    if k not in seen:
+                        seen.add(k); stack.append(k)
+            return False
+
+        kept: List[Dict[str, Any]] = []
+        for e in edges:
+            if e["dst"] in subj or e["src"] == e["dst"] or reaches(e["dst"], e["src"]):
+                self.graph.delete_edge(e["id"])
+                changes += 1
+                continue
+            kids.setdefault(e["src"], []).append(e["dst"])
+            kept.append(e)
+        by_dst: Dict[str, List[Dict[str, Any]]] = {}
+        for e in kept:
+            by_dst.setdefault(e["dst"], []).append(e)
+        for dst, ups in by_dst.items():
+            prim = [e for e in ups if (e.get("data") or {}).get("primary")]
+            if len(prim) != 1:
+                self.ensure_primary(dst)
+                changes += 1
+        # D4: a hub and a node it abstracts must not also carry a symmetric link (related_to /
+        # bridges / similar_to) — that is the audit item 17 rule, applied to old/hand-made graphs.
+        abstract_pairs = {(e["src"], e["dst"]) for e in kept}
+        for e in self.graph.list_edges():
+            if e["relation"] not in ("related_to", "bridges", "similar_to"):
+                continue
+            if (e["src"], e["dst"]) in abstract_pairs or (e["dst"], e["src"]) in abstract_pairs:
+                self.graph.delete_edge(e["id"])
+                changes += 1
+        return changes
 
     def subjects(self) -> List[Dict[str, Any]]:
         out = []
@@ -127,15 +203,25 @@ class Hierarchy:
             if is_subject(cur_node):
                 nodes.reverse(); edges.reverse()
                 return nodes, edges
-            ups = sorted((e for e in self.graph.edges_of(cur)
-                          if e["relation"] == "abstracts" and e["dst"] == cur and e["src"] not in seen),
-                         key=lambda e: e["src"])
+            ups = [e for e in self.graph.edges_of(cur)
+                   if e["relation"] == "abstracts" and e["dst"] == cur and e["src"] not in seen]
             if not ups:
                 break
-            subj_ups = [e for e in ups if is_subject(self.graph.get_node(e["src"]))]
-            e = (subj_ups or ups)[0]
+            e = self._pick_parent(ups)     # the primary parent, consistently
             edges.append(e["id"]); nodes.append(e["src"]); seen.add(e["src"]); cur = e["src"]
         return [], []
+
+    def _pick_parent(self, ups: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Primary parent edge (edge data primary=true) first, then a subject, then by id."""
+        def data(e):
+            d = e.get("data") or {}
+            return d if isinstance(d, dict) else {}
+        prim = sorted((e for e in ups if data(e).get("primary")), key=lambda e: e["src"])
+        if prim:
+            return prim[0]
+        ups = sorted(ups, key=lambda e: e["src"])
+        subj = [e for e in ups if is_subject(self.graph.get_node(e["src"]))]
+        return (subj or ups)[0]
 
     # ------------------------------------------------------------------ meaning
 
@@ -217,34 +303,10 @@ class Hierarchy:
         return node, score, nodes, edges
 
     def link_similar(self, node: Dict[str, Any], turn_id: str = "") -> int:
-        """Store similar_to links from node to the closest existing topics by meaning.
+        """Store similar_to links from node to the closest existing topics by meaning: k nearest
+        by node vector (memory/vector_graph.py: centroid, or label while a collection is empty).
         Main subjects and Peter are never linked this way (they are structure)."""
-        cfg = self.cfg
-        floor = float(cfg.get("similar_link_min", 0.6))
-        max_links = int(cfg.get("similar_link_max", 3))
-        if max_links <= 0 or node.get("kind") not in TOPIC_KINDS or is_subject(node):
-            return 0
-        label = node.get("label") or ""
-        try:
-            hits = self.vector.search_entities(label, n_results=max_links + 4)
-        except Exception:
-            return 0
-        made = 0
-        for h in hits:
-            if made >= max_links or h["score"] < floor:
-                break
-            other = self.graph.get_node(h["node_id"])
-            if (not other or other["id"] == node["id"] or other.get("status") == "pruned"
-                    or is_subject(other) or other.get("kind") not in TOPIC_KINDS):
-                continue
-            if (other.get("label") or "").strip().lower() == label.strip().lower():
-                continue
-            a, b = sorted((node["id"], other["id"]))   # one undirected link per pair
-            if self.graph.find_edge(a, b, "similar_to") or self.graph.find_edge(b, a, "similar_to"):
-                continue
-            if self.knowledge is not None:
-                self.knowledge.link(a, b, "similar_to", turn_id=turn_id)
-            else:
-                self.graph.link_once(a, b, "similar_to")
-            made += 1
-        return made
+        if self.vgraph is None:
+            from memory.vector_graph import VectorGraph
+            self.vgraph = VectorGraph(self.vector, self.graph, knowledge=self.knowledge)
+        return self.vgraph.link_similar(node, turn_id=turn_id)

@@ -83,7 +83,9 @@ def phases(events):
 def test_cycle_order_events_and_journal(cog, tmp_path, events):
     seed(cog, WEDDING)
     report = coordinator(cog, tmp_path).run_cycle(reason="manual")
-    assert phases(events) == ["usage_audit", "abstraction", "gap_scan", "background_research", "prune"]
+    # "maintenance" (hierarchy repair, stale copies, counts, vector weights/links) runs after prune
+    assert phases(events) == ["usage_audit", "abstraction", "merge", "fill", "gap_scan",
+                              "background_research", "prune", "maintenance"]
     assert of_type(events, "sleep_start")[0]["reason"] == "manual"
     assert of_type(events, "sleep_end")[0]["report"]["cycle_id"] == report["cycle_id"]
     journal = (tmp_path / "journal.jsonl").read_text(encoding="utf-8")

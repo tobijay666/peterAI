@@ -49,7 +49,6 @@ import json as _json
 import threading as _threading
 import time as _time
 from pathlib import Path as _Path
-from typing import Optional as _Optional
 
 _log_lock = _threading.Lock()
 

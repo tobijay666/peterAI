@@ -108,11 +108,13 @@ class CuriosityEngine:
         node_id = f"cur_{item_id}"
         self.graph.upsert_node(node_id, kind="curiosity", label=question[:200],
                                data={"curiosity_id": item_id}, importance=0.2)
+        edge_id = None
         if topic_node_id and self.graph.get_node(topic_node_id):
-            self.graph.link_once(node_id, topic_node_id, "curious_about")
+            edge_id, _ = self.graph.link_once(node_id, topic_node_id, "curious_about")
         item = self.get(item_id)
+        # edge_id: the stored curious_about edge, so the mind view draws exactly that edge
         emit("curiosity_added", user_id=self.user_id, turn_id=origin_turn_id, id=item_id, question=question,
-             topic_node_id=topic_node_id, priority=round(float(base_priority), 4), node_id=node_id)
+             topic_node_id=topic_node_id, priority=round(float(base_priority), 4), node_id=node_id, edge_id=edge_id)
         self._enforce_cap()
         return item
 
@@ -258,6 +260,14 @@ class CuriosityEngine:
             self._drop_node(item_id)
         else:
             self._set(item_id, status="pending")
+
+    def defer(self, item_id: str) -> None:
+        """Not researched for a reason that is not the question's fault (collection budget
+        used up): back to pending, and the attempt does not count."""
+        it = self.get(item_id)
+        if not it:
+            return
+        self._set(item_id, status="pending", attempts=max(0, int(it["attempts"]) - 1))
 
     def topic_for(self, item: Dict[str, Any]) -> str:
         """Research topic for an item: the stored topic term, its node label, else the main entity."""

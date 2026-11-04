@@ -30,8 +30,8 @@ from llm.router import LLMRouter
 from memory.eviction import EvictionScheduler
 from memory.graph_store import GraphMemory
 from memory.vector_store import VectorMemory
-from tools import fs_tools, git_tools, memory_tools, web_tools
-from tools.memory_tools import init_memory_tools
+from tools import fs_tools, git_tools, web_tools
+from tools.memory_tools import init_memory_tools, register_memory_tools
 from tools.registry import ToolRegistry
 from tts.service import TTSService
 
@@ -58,7 +58,7 @@ def bootstrap_system():
     # 2. Memory Stores
     vector_store = VectorMemory(persist_directory="data/chroma", embedding_model="all-MiniLM-L6-v2")
     graph_store = GraphMemory(database_path="data/peter_graph.db")
-    init_memory_tools(vector_store, graph_store)
+    mem_tools = init_memory_tools(vector_store, graph_store)
 
     # 3. LLM Router
     router = LLMRouter("config/providers.yaml")
@@ -295,110 +295,8 @@ def bootstrap_system():
         {"name": "run_tests", "description": "Runs test suite for QA validation.", "parameters": {"type": "object"}},
     )
 
-    # Register Memory tools
-    registry.register(
-        "memory_recall",
-        memory_tools.memory_recall,
-        {
-            "name": "memory_recall",
-            "description": "Recalls memories from vector store by query.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "namespace": {"type": "string"},
-                    "query": {"type": "string"},
-                    "n_results": {"type": "integer", "default": 5},
-                },
-                "required": ["namespace", "query"],
-            },
-        },
-    )
-    registry.register(
-        "memory_store",
-        memory_tools.memory_store,
-        {
-            "name": "memory_store",
-            "description": "Stores a finding or text in vector memory.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "namespace": {"type": "string"},
-                    "text": {"type": "string"},
-                    "importance": {"type": "number", "default": 0.5},
-                    "pinned": {"type": "boolean", "default": False},
-                    "kind": {"type": "string", "default": "finding"},
-                    "tags": {"type": "string", "default": ""},
-                },
-                "required": ["namespace", "text"],
-            },
-        },
-    )
-    registry.register(
-        "memory_prune",
-        memory_tools.memory_prune,
-        {
-            "name": "memory_prune",
-            "description": "Prunes unpinned memories by document IDs.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "namespace": {"type": "string"},
-                    "doc_ids": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["namespace", "doc_ids"],
-            },
-        },
-    )
-    registry.register(
-        "memory_pin",
-        memory_tools.memory_pin,
-        {
-            "name": "memory_pin",
-            "description": "Pins or unpins a vector memory record.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "namespace": {"type": "string"},
-                    "doc_id": {"type": "string"},
-                    "pinned": {"type": "boolean", "default": True},
-                },
-                "required": ["namespace", "doc_id"],
-            },
-        },
-    )
-    registry.register(
-        "graph_link",
-        memory_tools.graph_link,
-        {
-            "name": "graph_link",
-            "description": "Creates a relationship edge between graph nodes.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "src_id": {"type": "string"},
-                    "dst_id": {"type": "string"},
-                    "relation": {"type": "string"},
-                },
-                "required": ["src_id", "dst_id", "relation"],
-            },
-        },
-    )
-    registry.register(
-        "graph_query",
-        memory_tools.graph_query,
-        {
-            "name": "graph_query",
-            "description": "Queries connected neighbors in graph memory.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "node_id": {"type": "string"},
-                    "max_depth": {"type": "integer", "default": 2},
-                },
-                "required": ["node_id"],
-            },
-        },
-    )
+    # Register Memory tools (bound to this Peter's own stores; no module globals)
+    register_memory_tools(registry, mem_tools)
 
     # Register Voice tool
     def tts_speak(text: str) -> ToolResult:
@@ -435,6 +333,7 @@ def bootstrap_system():
     # 7b. Cognitive memory for the REPL: research runs inline (no WebSocket for a follow-up)
     from memory.recall import ContextBuilder
     cognition = build_cognition(vector_store, graph_store, router, guardrails, async_research=False)
+    mem_tools.knowledge = cognition.knowledge
     peter.cognition = cognition
     peter._context_builder = ContextBuilder(vector_store, graph_store, cognition=cognition)
 
@@ -502,7 +401,8 @@ def bootstrap_for_user(user_ctx):
         user_id=user_ctx.user_id,   # memory events reach this user's mind view
     )
     graph_store = GraphMemory(database_path=str(user_ctx.graph_db_path), user_id=user_ctx.user_id)
-    init_memory_tools(vector_store, graph_store)
+    # This user's memory tools: bound to this user's stores only (audit: no shared globals)
+    mem_tools = init_memory_tools(vector_store, graph_store)
 
     # LLM router (shared config, per-call state)
     router = LLMRouter("config/providers.yaml")
@@ -535,48 +435,8 @@ def bootstrap_for_user(user_ctx):
              "query": {"type": "string"}, "max_results": {"type": "integer", "default": 5}},
              "required": ["query"]}},
     )
-    registry.register(
-        "memory_recall", memory_tools.memory_recall,
-        {"name": "memory_recall", "description": "Recalls memories by query.",
-         "parameters": {"type": "object", "properties": {
-             "namespace": {"type": "string"}, "query": {"type": "string"},
-             "n_results": {"type": "integer", "default": 5}},
-             "required": ["namespace", "query"]}},
-    )
-    registry.register(
-        "memory_store", memory_tools.memory_store,
-        {"name": "memory_store", "description": "Stores a finding in vector memory.",
-         "parameters": {"type": "object", "properties": {
-             "namespace": {"type": "string"}, "text": {"type": "string"},
-             "importance": {"type": "number", "default": 0.5},
-             "pinned": {"type": "boolean", "default": False},
-             "kind": {"type": "string", "default": "finding"},
-             "tags": {"type": "string", "default": ""}},
-             "required": ["namespace", "text"]}},
-    )
-    registry.register(
-        "memory_pin", memory_tools.memory_pin,
-        {"name": "memory_pin", "description": "Pins or unpins a memory record.",
-         "parameters": {"type": "object", "properties": {
-             "namespace": {"type": "string"}, "doc_id": {"type": "string"},
-             "pinned": {"type": "boolean", "default": True}},
-             "required": ["namespace", "doc_id"]}},
-    )
-    registry.register(
-        "graph_link", memory_tools.graph_link,
-        {"name": "graph_link", "description": "Links two graph nodes.",
-         "parameters": {"type": "object", "properties": {
-             "src_id": {"type": "string"}, "dst_id": {"type": "string"},
-             "relation": {"type": "string"}},
-             "required": ["src_id", "dst_id", "relation"]}},
-    )
-    registry.register(
-        "graph_query", memory_tools.graph_query,
-        {"name": "graph_query", "description": "Queries graph neighbours.",
-         "parameters": {"type": "object", "properties": {
-             "node_id": {"type": "string"}, "max_depth": {"type": "integer", "default": 2}},
-             "required": ["node_id"]}},
-    )
+    register_memory_tools(registry, mem_tools,
+                          ["memory_recall", "memory_store", "memory_pin", "graph_link", "graph_query"])
 
     def tts_speak(text: str) -> ToolResult:
         tts_service.speak(text)
@@ -609,6 +469,7 @@ def bootstrap_for_user(user_ctx):
     # Cognitive memory: graph-indexed recall, on-demand research, curiosity queue.
     from memory.recall import ContextBuilder
     cognition = build_cognition(vector_store, graph_store, router, guardrails, async_research=False)
+    mem_tools.knowledge = cognition.knowledge
     peter.cognition = cognition
     cb = ContextBuilder(vector_store, graph_store, cognition=cognition)
     peter._context_builder = cb

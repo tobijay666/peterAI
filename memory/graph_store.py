@@ -3,7 +3,6 @@
 import json
 import re
 import sqlite3
-import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -45,12 +44,16 @@ _V3_NODE_COLUMNS = {
     "pos_x":         "REAL",
     "pos_y":         "REAL",
     "pos_z":         "REAL",
+    # position in the force-directed "graph" layout (memory/graph_layout.py), kept between snapshots
+    "gpos_x":        "REAL",
+    "gpos_y":        "REAL",
+    "gpos_z":        "REAL",
 }
 _SETTABLE_NODE_FIELDS = set(_V3_NODE_COLUMNS) | {"importance", "pinned", "label", "last_used"}
 _NODE_SELECT = (
     "SELECT id, kind, label, data, created_at, last_used, importance, pinned, "
     "access_count, last_accessed, usage_score, collection, status, confidence, "
-    "fading_since, pos_x, pos_y, pos_z FROM nodes"
+    "fading_since, pos_x, pos_y, pos_z, gpos_x, gpos_y, gpos_z FROM nodes"
 )
 
 class _ClosingConnection(sqlite3.Connection):
@@ -129,6 +132,7 @@ class GraphMemory:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_kind ON nodes(kind);")
             self._migrate_to_v2(conn)
             self._migrate_to_v3(conn)
+            self._migrate_vectors(conn)
             conn.commit()
         logger.info(f"GraphMemory initialized at {self.db_path}")
 
@@ -191,6 +195,149 @@ class GraphMemory:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes(status);")
         if version < 3:
             conn.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)", (3, self._clock.now()))
+
+    def _migrate_vectors(self, conn: sqlite3.Connection) -> None:
+        """Vector-grounded graph (idempotent, additive):
+        node_vectors  one vector per topic node (its collection centroid, or its label while the
+                      collection is empty) and Peter's own (mean of his subjects)
+        vector_links  record-level links of a topic-topic edge: the most similar record pairs
+                      across the two collections (deleted with the edge)."""
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS node_vectors (
+                node_id    TEXT PRIMARY KEY,
+                vector     TEXT NOT NULL,
+                basis      TEXT NOT NULL DEFAULT 'centroid',
+                n          INTEGER NOT NULL DEFAULT 0,
+                updated_at REAL NOT NULL,
+                FOREIGN KEY(node_id) REFERENCES nodes(id) ON DELETE CASCADE
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS vector_links (
+                edge_id    TEXT NOT NULL,
+                src_node   TEXT NOT NULL,
+                dst_node   TEXT NOT NULL,
+                src_record TEXT NOT NULL,
+                dst_record TEXT NOT NULL,
+                similarity REAL NOT NULL,
+                PRIMARY KEY (edge_id, src_record, dst_record),
+                FOREIGN KEY(edge_id) REFERENCES edges(id) ON DELETE CASCADE
+            );
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vlinks_src ON vector_links(src_record);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vlinks_dst ON vector_links(dst_record);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_edges_relation ON edges(relation);")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS graph_meta (key TEXT PRIMARY KEY, value TEXT, updated_at REAL);"
+        )
+
+    # ------------------------------------------------------------------ small key/value meta
+
+    def get_meta(self, key: str) -> Optional[str]:
+        with self._get_connection() as conn:
+            r = conn.execute("SELECT value FROM graph_meta WHERE key = ?;", (key,)).fetchone()
+            return r["value"] if r else None
+
+    def set_meta(self, key: str, value: Optional[str]) -> None:
+        with self._get_connection() as conn:
+            if value is None:
+                conn.execute("DELETE FROM graph_meta WHERE key = ?;", (key,))
+            else:
+                conn.execute(
+                    "INSERT INTO graph_meta (key, value, updated_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;",
+                    (key, value, self._clock.now()),
+                )
+            conn.commit()
+
+    # ------------------------------------------------------------------ vectors of nodes / record links
+
+    def set_node_vector(self, node_id: str, vector: List[float], basis: str, n: int) -> None:
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO node_vectors (node_id, vector, basis, n, updated_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(node_id) DO UPDATE SET vector = excluded.vector, basis = excluded.basis, "
+                "n = excluded.n, updated_at = excluded.updated_at;",
+                (node_id, json.dumps([round(float(x), 6) for x in vector]), basis, int(n), self._clock.now()),
+            )
+            conn.commit()
+
+    def get_node_vector(self, node_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            r = conn.execute("SELECT * FROM node_vectors WHERE node_id = ?;", (node_id,)).fetchone()
+            if not r:
+                return None
+            return {"node_id": r["node_id"], "vector": json.loads(r["vector"]), "basis": r["basis"],
+                    "n": int(r["n"]), "updated_at": r["updated_at"]}
+
+    def replace_vector_links(self, edge_id: str, rows: List[Tuple[str, str, str, str, float]]) -> None:
+        """rows: (src_node, dst_node, src_record, dst_record, similarity)."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM vector_links WHERE edge_id = ?;", (edge_id,))
+            if rows:
+                conn.executemany(
+                    "INSERT OR REPLACE INTO vector_links (edge_id, src_node, dst_node, src_record, dst_record, "
+                    "similarity) VALUES (?, ?, ?, ?, ?, ?);",
+                    [(edge_id, a, b, ra, rb, float(sim)) for a, b, ra, rb, sim in rows],
+                )
+            conn.commit()
+
+    def replace_vector_links_many(self, by_edge: Dict[str, List[Tuple[str, str, str, str, float]]]) -> None:
+        """replace_vector_links for many edges in one transaction."""
+        if not by_edge:
+            return
+        with self._get_connection() as conn:
+            ids = list(by_edge)
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                conn.execute(f"DELETE FROM vector_links WHERE edge_id IN ({','.join('?' for _ in chunk)});",
+                             tuple(chunk))
+            rows = [(eid, a, b, ra, rb, float(sim)) for eid, rs in by_edge.items() for a, b, ra, rb, sim in rs]
+            if rows:
+                conn.executemany(
+                    "INSERT OR REPLACE INTO vector_links (edge_id, src_node, dst_node, src_record, dst_record, "
+                    "similarity) VALUES (?, ?, ?, ?, ?, ?);", rows)
+            conn.commit()
+
+    def vector_links_for_records(self, record_ids: List[str]) -> List[Dict[str, Any]]:
+        ids = list(dict.fromkeys(record_ids))
+        if not ids:
+            return []
+        marks = ",".join("?" for _ in ids)
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM vector_links WHERE src_record IN ({marks}) OR dst_record IN ({marks});",
+                (*ids, *ids),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def vector_links_of_edges(self, edge_ids: List[str]) -> List[Dict[str, Any]]:
+        ids = list(dict.fromkeys(edge_ids))
+        if not ids:
+            return []
+        marks = ",".join("?" for _ in ids)
+        with self._get_connection() as conn:
+            rows = conn.execute(f"SELECT * FROM vector_links WHERE edge_id IN ({marks});", tuple(ids)).fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_vector_links_for_records(self, record_ids: List[str]) -> int:
+        ids = list(dict.fromkeys(record_ids))
+        if not ids:
+            return 0
+        marks = ",".join("?" for _ in ids)
+        with self._get_connection() as conn:
+            cur = conn.execute(f"DELETE FROM vector_links WHERE src_record IN ({marks}) OR dst_record IN ({marks});",
+                               (*ids, *ids))
+            conn.commit()
+            return cur.rowcount
+
+    def count_vector_links(self) -> int:
+        with self._get_connection() as conn:
+            return int(conn.execute("SELECT COUNT(*) AS c FROM vector_links;").fetchone()["c"])
 
     def _migrate_to_v2(self, conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -257,15 +404,21 @@ class GraphMemory:
         kind: str,
         label: str,
         data: Optional[Dict[str, Any]] = None,
-        importance: float = 0.5,
-        pinned: bool = False,
+        importance: Optional[float] = None,
+        pinned: Optional[bool] = None,
     ) -> str:
+        """Insert a node, or update kind/label/last_used of an existing one.
+
+        ``data``, ``importance`` and ``pinned`` are only changed on an existing node when
+        passed explicitly (not None): a plain re-upsert never wipes a subject's role, a
+        pinned flag or a learned importance. New nodes default to {} / 0.5 / False.
+        """
         if kind not in VALID_NODE_KINDS:
             logger.warning(f"GraphMemory.upsert_node: Unknown node kind '{kind}'.")
-        if kind == 'skill' and not data:
-            data = {}
         now = self._clock.now()
+        has_data, has_imp, has_pin = data is not None, importance is not None, pinned is not None
         data_str = json.dumps(data) if data else "{}"
+        imp = float(importance) if has_imp else 0.5
         pinned_int = 1 if pinned else 0
 
         with self._get_connection() as conn:
@@ -276,12 +429,13 @@ class GraphMemory:
                 ON CONFLICT(id) DO UPDATE SET
                     kind=excluded.kind,
                     label=excluded.label,
-                    data=excluded.data,
+                    data=CASE WHEN ? THEN excluded.data ELSE data END,
                     last_used=excluded.last_used,
-                    importance=excluded.importance,
-                    pinned=excluded.pinned;
+                    importance=CASE WHEN ? THEN excluded.importance ELSE importance END,
+                    pinned=CASE WHEN ? THEN excluded.pinned ELSE pinned END;
                 """,
-                (node_id, kind, label, data_str, now, now, importance, pinned_int),
+                (node_id, kind, label, data_str, now, now, imp, pinned_int,
+                 1 if has_data else 0, 1 if has_imp else 0, 1 if has_pin else 0),
             )
             conn.commit()
         return node_id
@@ -309,6 +463,24 @@ class GraphMemory:
             )
             conn.commit()
         return edge_id
+
+    def link_many(self, triples: List[Tuple[str, str, str, Optional[Dict[str, Any]]]]) -> List[str]:
+        """Insert many edges in ONE transaction (bulk sleep work; the caller has already
+        deduped and validated). Returns the new edge ids in order."""
+        if not triples:
+            return []
+        now = self._clock.now()
+        rows, ids = [], []
+        for src_id, dst_id, relation, data in triples:
+            eid = str(uuid.uuid4())
+            ids.append(eid)
+            rows.append((eid, src_id, dst_id, relation, json.dumps(data) if data else "{}", now))
+        with self._get_connection() as conn:
+            conn.executemany(
+                "INSERT INTO edges (id, src, dst, relation, data, created_at) VALUES (?, ?, ?, ?, ?, ?);", rows
+            )
+            conn.commit()
+        return ids
 
     def neighbors(self, node_id: str, max_depth: int = 2) -> List[Dict[str, Any]]:
         """Returns direct and n-hop connected graph neighbors (deduped by edge_id)."""
@@ -460,6 +632,15 @@ class GraphMemory:
             conn.commit()
             return cur.rowcount > 0
 
+    def set_graph_positions(self, positions: Dict[str, Tuple[float, float, float]]) -> None:
+        """Store graph-layout positions of many nodes in one transaction."""
+        if not positions:
+            return
+        with self._get_connection() as conn:
+            conn.executemany("UPDATE nodes SET gpos_x = ?, gpos_y = ?, gpos_z = ? WHERE id = ?;",
+                             [(p[0], p[1], p[2], nid) for nid, p in positions.items()])
+            conn.commit()
+
     def touch(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Activation: increment access_count, set last_accessed, restore 'active' status.
 
@@ -507,13 +688,28 @@ class GraphMemory:
                 for r in rows
             ]
 
+    def edge_pairs(self, relation: str) -> List[Tuple[str, str]]:
+        """(src, dst) of every edge with this relation (one cheap query)."""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT src, dst FROM edges WHERE relation = ?;", (relation,)).fetchall()
+            return [(r["src"], r["dst"]) for r in rows]
+
     def edges_of(self, node_id: str) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             rows = conn.execute(
-                "SELECT id, src, dst, relation, created_at FROM edges WHERE src = ? OR dst = ?;",
+                "SELECT id, src, dst, relation, data, created_at FROM edges WHERE src = ? OR dst = ?;",
                 (node_id, node_id),
             ).fetchall()
-            return [dict(r) for r in rows]
+            out = []
+            for r in rows:
+                d = dict(r)
+                raw = d.get("data")
+                try:
+                    d["data"] = json.loads(raw) if raw and raw != "{}" else {}
+                except Exception:
+                    d["data"] = {}
+                out.append(d)
+            return out
 
     def find_edge(self, src_id: str, dst_id: str, relation: str) -> Optional[str]:
         with self._get_connection() as conn:
@@ -530,6 +726,46 @@ class GraphMemory:
         if existing:
             return existing, False
         return self.link(src_id, dst_id, relation, data), True
+
+    def delete_edge(self, edge_id: str) -> bool:
+        with self._get_connection() as conn:
+            cur = conn.execute("DELETE FROM edges WHERE id = ?;", (edge_id,))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def get_edge(self, edge_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            r = conn.execute("SELECT id, src, dst, relation, data, created_at FROM edges WHERE id = ?;",
+                             (edge_id,)).fetchone()
+            if not r:
+                return None
+            return {"id": r["id"], "src": r["src"], "dst": r["dst"], "relation": r["relation"],
+                    "data": json.loads(r["data"] or "{}"), "created_at": r["created_at"]}
+
+    def update_edge_data(self, edge_id: str, **fields: Any) -> bool:
+        """Merge fields into an edge's JSON data (None removes a key)."""
+        e = self.get_edge(edge_id)
+        if e is None:
+            return False
+        data = dict(e["data"] or {})
+        for k, v in fields.items():
+            if v is None:
+                data.pop(k, None)
+            else:
+                data[k] = v
+        with self._get_connection() as conn:
+            conn.execute("UPDATE edges SET data = ? WHERE id = ?;", (json.dumps(data), edge_id))
+            conn.commit()
+        return True
+
+    def set_edge_data_many(self, items: List[Tuple[str, Dict[str, Any]]]) -> None:
+        """Replace the JSON data of many edges in one transaction: [(edge_id, data)]."""
+        if not items:
+            return
+        with self._get_connection() as conn:
+            conn.executemany("UPDATE edges SET data = ? WHERE id = ?;",
+                             [(json.dumps(d), eid) for eid, d in items])
+            conn.commit()
 
     def degree(self, node_id: str) -> int:
         with self._get_connection() as conn:
@@ -549,7 +785,18 @@ class GraphMemory:
 
     @staticmethod
     def normalize_alias(text: str) -> str:
+        """Alias key. Keeps meaningful symbols so 'C', 'C++' and 'C#' are three keys."""
+        return " ".join(re.findall(r"[a-z0-9]+[+#]*|[+#]+", (text or "").lower()))
+
+    @staticmethod
+    def legacy_normalize_alias(text: str) -> str:
+        """The alias key of schema v3 (symbols dropped); used only to upgrade old rows."""
         return " ".join(re.findall(r"[a-z0-9]+", (text or "").lower()))
+
+    def remove_alias(self, node_id: str, alias_norm: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM node_aliases WHERE alias_norm = ? AND node_id = ?;", (alias_norm, node_id))
+            conn.commit()
 
     def add_alias(self, node_id: str, alias: str) -> None:
         norm = self.normalize_alias(alias)
@@ -611,6 +858,18 @@ class GraphMemory:
         with self._get_connection() as conn:
             r = conn.execute("SELECT * FROM collections WHERE name = ?;", (name,)).fetchone()
             return dict(r) if r else None
+
+    def bump_collection_count(self, name: str, delta: int) -> None:
+        """Add `delta` to a collection's record_count in one statement (no re-count).
+        A later authoritative recount (sleep reconcile / delete) corrects any drift."""
+        if not delta:
+            return
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE collections SET record_count = MAX(0, COALESCE(record_count, 0) + ?) WHERE name = ?;",
+                (int(delta), name),
+            )
+            conn.commit()
 
     def update_collection_stats(self, name: str, record_count: Optional[int] = None,
                                 accessed: bool = False) -> None:

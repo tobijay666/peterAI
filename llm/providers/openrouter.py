@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 import requests
 from core.clock import SystemClock
 from core.logger import logger

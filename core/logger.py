@@ -3,7 +3,6 @@
 import logging
 import re
 import sys
-from pathlib import Path
 
 
 class SecretScrubbingFormatter(logging.Formatter):

@@ -80,11 +80,34 @@ class UsageTracker:
         now = self._clock.now()
         nodes = [n for n in self.graph.all_nodes(kinds or COGNITIVE_KINDS) if n.get("status") != "pruned"]
         scores = {n["id"]: self.score_node(n, now) for n in nodes}
+        self._roll_up(scores)
         pct = percentile_ranks(scores)
         if persist:
             for nid, sc in scores.items():
                 self.graph.set_node_fields(nid, usage_score=sc)
         return {nid: {"score": scores[nid], "percentile": pct[nid]} for nid in scores}
+
+    def _roll_up(self, scores: Dict[str, float]) -> None:
+        """A hub is used whenever one of its members is: every 'abstracts' parent scores at
+        least ``usage.rollup_factor`` x its best child's (decayed) score, all the way up to
+        the main subject. Access counts stay honest (visiting a hub is not touching it);
+        only the score - and so the tier and the prune decision - follows the children."""
+        factor = float(self.cfg["usage"].get("rollup_factor", 0.9))
+        if factor <= 0 or not scores:
+            return
+        try:
+            pairs = [(p, c) for p, c in self.graph.edge_pairs("abstracts") if p in scores and c in scores and p != c]
+        except Exception:
+            return
+        for _ in range(6):                      # depth of the deepest hub chain we care about
+            changed = False
+            for p, c in pairs:
+                cand = scores[c] * factor
+                if cand > scores[p] + 1e-12:
+                    scores[p] = cand
+                    changed = True
+            if not changed:
+                break
 
     def percentile_of(self, node_id: str) -> float:
         return self.recompute_all(persist=False).get(node_id, {}).get("percentile", 0.5)

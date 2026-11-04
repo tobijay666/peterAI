@@ -6,6 +6,7 @@ enabled: true            # false = fall back to the old agent-namespace recall o
 usage:
   half_life_days: 14     # recency decay of the usage score
   baseline_importance: 0.5
+  rollup_factor: 0.9     # a hub/subject scores at least this x its best member's usage (never fades while used)
 
 resolver:
   index_min_similarity: 0.55   # entity-index match floor for semantic lookup
@@ -21,8 +22,15 @@ recall:
   record_fallback_min: 0.45    # no node matched: a record this close in any collection anchors its node
   record_fallback_max_collections: 64
   tree_walk_min: 0.4           # no topic by name: walk Peter -> subject -> topic while matches stay this close
-  similar_link_min: 0.6        # new topic: store similar_to links to existing topics at least this close
-  similar_link_max: 3
+
+vectors:                       # edges grounded in the vectors (memory/vector_graph.py)
+  similar_add_min: 0.6         # similar_to: k nearest topics by centroid (label while empty) at least this close
+  similar_remove_below: 0.45   # ...and an existing similar_to is dropped in sleep only below this (hysteresis)
+  similar_k: 3                 # neighbours per topic
+  record_links_k: 3            # record-level links stored per topic-topic edge (most similar record pairs)
+  record_link_min: 0.30        # a record pair must be at least this similar to be linked
+  follow_weight: 0.5           # recall: score of a record pulled through a vector link = hit x similarity x this
+  max_follow: 6                # recall: at most this many vector links followed per query
 
 sufficiency:
   min_score: 0.30              # hits from the matched collection must reach this similarity
@@ -52,6 +60,14 @@ curiosity:
     recency: 0.1
   max_pending: 200
 
+fill:                          # every topic / hub / subject node is a vector store filled with knowledge
+  thin_records: 3              # a collection with fewer records than this is "thin" (0 = empty)
+  member_records: 3            # a hub copies this many of each member's most central records (with provenance)
+  max_hub_records: 40          # ...up to this many aggregated records per hub
+  max_per_cycle: 3             # sleep: hubs/subjects researched (overview query) per cycle; the rest are queued
+  research_in_chat: false      # true: research a new hub's overview right away in chat (background when async);
+                               # false: hubs are aggregated from members now and researched by the next sleep
+
 sleep:
   idle_minutes: 20             # start a cycle after this much idle time
   min_hours_between: 6         # ...but not more often than this
@@ -67,13 +83,19 @@ sleep:
     max_similarity: 0.80
     migrate_min_similarity: 0.40   # record must be this close to the group centroid to be copied
     max_records_per_member: 8
+  merge:                       # near-duplicate topics (same thing, two names) are merged in sleep
+    label_similarity: 0.92     # label embeddings at least this close...
+    centroid_similarity: 0.90  # ...and, when both have facts, their centroids too
+    max_per_cycle: 5
   gaps:
     min_degree: 2
     min_records: 3
     min_confidence: 0.5
 
 visual:
-  layout: cluster              # "cluster": 3-D tree, similar topics close together; "tree": flat top-down tree; "semantic": meaning only
+  layout: graph                # "graph": 3-D force-directed picture of the stored vector graph (edge length follows
+                               # similarity, Peter at the origin); "cluster": 3-D tree, similar topics close together;
+                               # "tree": flat top-down tree; "semantic": meaning only
   tiers:
     high_percentile: 0.80
     low_percentile: 0.30

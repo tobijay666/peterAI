@@ -28,7 +28,7 @@ from core.interfaces import ToolResult
 from core.events import emit
 from core.logger import logger
 from engine import task_planner
-from engine.task_queue import TaskQueue, TaskWorkerPool
+from engine.task_queue import TaskQueue
 from llm.router import LLMRouter
 from memory.graph_store import GraphMemory
 from memory.vector_store import VectorMemory

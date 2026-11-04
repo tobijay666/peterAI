@@ -2,10 +2,9 @@
 
 Scans tests/ for @pytest.mark.req markers and outputs validation/traceability.md.
 """
-import ast
 import re
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List
 
 OUTPUT_PATH = Path("validation/traceability.md")
 TESTS_DIR = Path("tests")

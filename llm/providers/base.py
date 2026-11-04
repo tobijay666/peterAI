@@ -2,7 +2,7 @@
 
 import re
 import os
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Any, Dict, List, Optional
 import openai
 from core.interfaces import Message
@@ -32,7 +32,6 @@ def _is_request_specific_error(e: Exception) -> bool:
 class ProviderError(Exception):
     """Raised when provider call fails."""
 
-    pass
 
 
 class BaseProvider(ABC):

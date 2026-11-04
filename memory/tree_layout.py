@@ -54,7 +54,8 @@ def _parent_candidates(edges: Iterable[Dict], ids: set, kind: Dict[str, str],
     for e in edges:
         s, d, rel = e["src"], e["dst"], e["relation"]
         if rel == "abstracts":                       # hub above the topic it abstracts
-            add(d, s, 0)
+            data = e.get("data") or {}
+            add(d, s, -1 if isinstance(data, dict) and data.get("primary") else 0)   # primary hub first
         elif rel == "curious_about":                 # the question hangs under its topic
             add(s, d, 1)
         elif rel in ("similar_to", "has_subject", "helper_of", "spawned_by"):

@@ -19,9 +19,14 @@ def get_embedding_model(model_name: str = "all-MiniLM-L6-v2"):
         _model_instance = SentenceTransformer(model_name)
         return _model_instance
     except Exception as e:
-        logger.warning(f"Could not load SentenceTransformer ({e}). Using deterministic fallback embedder.")
+        # Loud on purpose: hash vectors carry NO meaning, so similarity, entity resolution,
+        # abstraction, edge weights and the graph layout are all noise until this is fixed.
+        logger.error(f"Could not load SentenceTransformer '{model_name}' ({e}). Falling back to a "
+                     "deterministic HASH embedder: vectors are random, semantic memory is DEGRADED "
+                     "(cognition.semantic_ok = false). Install sentence-transformers / the model to fix.")
 
         class FallbackEmbedder:
+            semantic = False   # read by is_semantic(); surfaced as cognition.semantic_ok
 
             def encode(self, texts, **kwargs):
                 if isinstance(texts, str):
@@ -39,6 +44,13 @@ def get_embedding_model(model_name: str = "all-MiniLM-L6-v2"):
 
         _model_instance = FallbackEmbedder()
         return _model_instance
+
+
+def is_semantic(embed_fn) -> bool:
+    """False when an embedding function is (or wraps) the random hash fallback."""
+    if getattr(embed_fn, "semantic", True) is False:
+        return False
+    return getattr(getattr(embed_fn, "model", None), "semantic", True) is not False
 
 
 class LocalEmbeddingFunction:

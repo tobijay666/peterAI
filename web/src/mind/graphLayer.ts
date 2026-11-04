@@ -9,7 +9,7 @@
  */
 import * as THREE from 'three';
 import type { GraphEdge, GraphNode, GraphSnapshot, NodeStyle } from './types';
-import { DEFAULT_EDGE_HEX, KIND_HUE, RELATION_HEX } from './types';
+import { DEFAULT_EDGE_HEX, KIND_HUE, RELATION_HEX, SELF_ID } from './types';
 
 type GroupName = 'high' | 'moderate' | 'low' | 'fading' | 'faint' | 'fixed';
 const GROUPS: Record<GroupName, { opacity: number }> = {
@@ -39,6 +39,12 @@ interface VNode {
 interface VEdge { data: GraphEdge; progress: number; }
 
 const BASE_RADIUS = 0.42;
+const ORIGIN = new THREE.Vector3(0, 0, 0);   // Peter's core: the end of his has_subject edges
+/** Edge brightness (our stand-in for opacity/thickness: WebGL lines are 1px) from its vector weight. */
+export function edgeIntensity(e: GraphEdge): number {
+  const w = typeof e.weight === 'number' ? Math.max(0, Math.min(1, e.weight)) : 0.45;
+  return 0.18 + 0.95 * w;
+}
 const SPAWN_MS = 650;
 const DIE_MS = 900;
 
@@ -73,8 +79,10 @@ export class GraphLayer {
   private capacity = new Map<GroupName, number>();
   private dirty = true;
   private geo = new THREE.SphereGeometry(BASE_RADIUS, 20, 14);
-  private lines: THREE.LineSegments;
+  private lines: THREE.LineSegments;          // part-of / related / bridges / Peter's edges
   private lineCap = 0;
+  private dashed: THREE.LineSegments;         // similar_to: neighbours by meaning, drawn dashed
+  private dashCap = 0;
   private dummy = new THREE.Object3D();
   private tmpColor = new THREE.Color();
   private dimmed = 1.0;
@@ -88,6 +96,27 @@ export class GraphLayer {
     this.lines.frustumCulled = false;
     this.root.add(this.lines);
     this.growLines(512);
+    const dmat = new THREE.LineDashedMaterial({ vertexColors: true, transparent: true, opacity: 0.7, toneMapped: false,
+      dashSize: 0.45, gapSize: 0.3 });
+    this.dashed = new THREE.LineSegments(new THREE.BufferGeometry(), dmat);
+    this.dashed.frustumCulled = false;
+    this.root.add(this.dashed);
+    this.growDashed(128);
+  }
+
+  private growDashed(edgeCap: number): void {
+    this.dashCap = edgeCap;
+    const geo = this.dashed.geometry as THREE.BufferGeometry;
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(edgeCap * 6), 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(edgeCap * 6), 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('lineDistance', new THREE.BufferAttribute(new Float32Array(edgeCap * 2), 1).setUsage(THREE.DynamicDrawUsage));
+  }
+
+  /** Where an edge ends: a drawn node, or Peter's core at the origin. */
+  private endpoint(id: string): THREE.Vector3 | null {
+    const v = this.nodes.get(id);
+    if (v) return v.pos;
+    return id === SELF_ID ? ORIGIN : null;
   }
 
   // ---------------------------------------------------------------- buffers
@@ -288,36 +317,57 @@ export class GraphLayer {
         this.dummy.scale.setScalar(s);
         this.dummy.updateMatrix();
         mesh.setMatrixAt(i, this.dummy.matrix);
-        this.tmpColor.copy(v.color).multiplyScalar(this.dimmed * (1 + v.flash * 1.6));
+        const emptyDim = v.data.empty ? 0.55 : 1;      // no knowledge in its vector store yet
+        this.tmpColor.copy(v.color).multiplyScalar(this.dimmed * emptyDim * (1 + v.flash * 1.6));
         mesh.setColorAt(i, this.tmpColor);
       }
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
 
-    // edges
+    // edges: brightness follows the stored vector weight; similar_to goes to the dashed layer
     if (this.edges.size > this.lineCap) this.growLines(Math.max(this.edges.size, this.lineCap * 2));
+    if (this.edges.size > this.dashCap) this.growDashed(Math.max(this.edges.size, this.dashCap * 2));
     const geo = this.lines.geometry as THREE.BufferGeometry;
     const P = geo.getAttribute('position') as THREE.BufferAttribute;
     const C = geo.getAttribute('color') as THREE.BufferAttribute;
-    let i = 0;
+    const dgeo = this.dashed.geometry as THREE.BufferGeometry;
+    const DP = dgeo.getAttribute('position') as THREE.BufferAttribute;
+    const DC = dgeo.getAttribute('color') as THREE.BufferAttribute;
+    const DL = dgeo.getAttribute('lineDistance') as THREE.BufferAttribute;
+    let i = 0, j = 0;
     const c = this.tmpColor;
     for (const e of this.edges.values()) {
-      const a = this.nodes.get(e.data.src), b = this.nodes.get(e.data.dst);
+      const a = this.endpoint(e.data.src), b = this.endpoint(e.data.dst);
       if (!a || !b) continue;
       if (e.progress < 1) e.progress = Math.min(1, e.progress + dt * 2.2);
       const p = e.progress;
-      const bx = a.pos.x + (b.pos.x - a.pos.x) * p, by = a.pos.y + (b.pos.y - a.pos.y) * p, bz = a.pos.z + (b.pos.z - a.pos.z) * p;
-      P.setXYZ(i * 2, a.pos.x, a.pos.y, a.pos.z);
-      P.setXYZ(i * 2 + 1, bx, by, bz);
-      c.setHex(RELATION_HEX[e.data.relation] ?? DEFAULT_EDGE_HEX).multiplyScalar(this.dimmed * (p < 1 ? 1.8 : 1));
-      C.setXYZ(i * 2, c.r, c.g, c.b);
-      C.setXYZ(i * 2 + 1, c.r, c.g, c.b);
-      i++;
+      const bx = a.x + (b.x - a.x) * p, by = a.y + (b.y - a.y) * p, bz = a.z + (b.z - a.z) * p;
+      c.setHex(RELATION_HEX[e.data.relation] ?? DEFAULT_EDGE_HEX)
+        .multiplyScalar(this.dimmed * edgeIntensity(e.data) * (p < 1 ? 1.8 : 1));
+      if (e.data.relation === 'similar_to') {
+        DP.setXYZ(j * 2, a.x, a.y, a.z);
+        DP.setXYZ(j * 2 + 1, bx, by, bz);
+        DL.setX(j * 2, 0);
+        DL.setX(j * 2 + 1, Math.hypot(bx - a.x, by - a.y, bz - a.z));
+        DC.setXYZ(j * 2, c.r, c.g, c.b);
+        DC.setXYZ(j * 2 + 1, c.r, c.g, c.b);
+        j++;
+      } else {
+        P.setXYZ(i * 2, a.x, a.y, a.z);
+        P.setXYZ(i * 2 + 1, bx, by, bz);
+        C.setXYZ(i * 2, c.r, c.g, c.b);
+        C.setXYZ(i * 2 + 1, c.r, c.g, c.b);
+        i++;
+      }
     }
     geo.setDrawRange(0, i * 2);
     P.needsUpdate = true;
     C.needsUpdate = true;
+    dgeo.setDrawRange(0, j * 2);
+    DP.needsUpdate = true;
+    DC.needsUpdate = true;
+    DL.needsUpdate = true;
   }
 
   dispose(): void {
@@ -325,5 +375,7 @@ export class GraphLayer {
     this.geo.dispose();
     this.lines.geometry.dispose();
     (this.lines.material as THREE.Material).dispose();
+    this.dashed.geometry.dispose();
+    (this.dashed.material as THREE.Material).dispose();
   }
 }

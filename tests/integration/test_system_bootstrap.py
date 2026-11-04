@@ -6,7 +6,7 @@ from memory.vector_store import VectorMemory
 from memory.graph_store import GraphMemory
 from llm.router import LLMRouter
 from tools.registry import ToolRegistry
-from tools.memory_tools import init_memory_tools, memory_store, memory_recall
+from tools.memory_tools import init_memory_tools
 from agents.peter import PeterAgent
 from agents.researcher import ResearcherAgent
 from agents.filesystem import FileSystemAgent
@@ -26,14 +26,14 @@ def test_system_bootstrap_and_integration(temp_dir):
     graph_db = temp_dir / "graph.db"
     vm = VectorMemory(persist_directory=str(chroma_dir))
     gm_store = GraphMemory(database_path=str(graph_db))
-    init_memory_tools(vm, gm_store)
+    tools = init_memory_tools(vm, gm_store)   # bound to these stores (no module globals)
 
     assert len(vm.collections) == 7
 
     # 3. Memory store roundtrip
-    store_res = memory_store(namespace="peter", text="Sir Anton system bootstrap integration test.", importance=0.9)
+    store_res = tools.memory_store(namespace="peter", text="Sir Anton system bootstrap integration test.", importance=0.9)
     assert store_res.success
-    recall_res = memory_recall(namespace="peter", query="bootstrap integration test")
+    recall_res = tools.memory_recall(namespace="peter", query="bootstrap integration test")
     assert recall_res.success
     assert "Sir Anton" in recall_res.output
 

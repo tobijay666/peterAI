@@ -5,7 +5,10 @@
  *    glowing by the server's usage style (high usage blooms, low usage is dull and
  *    faint, fading nodes shrink, pruned nodes dissolve into dust).
  *  • Recall: the camera flies to the matched node and a light pulse travels from
- *    Peter's core along the exact edges graph recall traversed.
+ *    Peter's core along the exact edges graph recall traversed, then on along the
+ *    record-level vector links it followed into neighbouring collections.
+ *  • Layout "graph" (default): the server's force-directed picture of the stored vector
+ *    graph; every line is a stored edge, brighter = more similar, similar_to dashed.
  *  • Sleep: the scene dims; new nodes spawn, edges draw in, embeddings stream into
  *    abstractions, unused nodes fade and are pruned — all from live events.
  *  • Click a node to inspect it; double-click (or "View vectors") to fly into its
@@ -27,7 +30,8 @@ import { GraphLayer } from './graphLayer';
 import { Inspector } from './inspector';
 import { Labels } from './labels';
 import { RecordsLayer } from './records';
-import type { GraphEdge, GraphSnapshot, NodeStyle } from './types';
+import type { GraphEdge, GraphSnapshot, NodeStyle, VectorLink } from './types';
+import { SELF_ID } from './types';
 
 const AWAKE_BG = new THREE.Color(0x060610);
 const SLEEP_BG = new THREE.Color(0x040a24);
@@ -61,6 +65,13 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
   root.appendChild(hud);
   const stateEl = hud.querySelector<HTMLElement>('.mind-state')!;
   const statsEl = hud.querySelector<HTMLElement>('.mind-hud-stats')!;
+  const warnEl = document.createElement('span');
+  warnEl.className = 'mind-state';
+  warnEl.dataset['state'] = 'warning';
+  warnEl.title = 'The embedding model failed to load: vectors are random hashes, similarity is meaningless.';
+  warnEl.textContent = 'embeddings degraded';
+  warnEl.style.display = 'none';
+  hud.querySelector('.mind-hud-left')!.appendChild(warnEl);
 
   const toast = document.createElement('div');
   toast.className = 'mind-toast';
@@ -73,7 +84,8 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
   legend.className = 'mind-legend';
   legend.innerHTML = `
     <span><i class="lg lg-entity"></i>topic</span><span><i class="lg lg-abstraction"></i>abstraction</span>
-    <span><i class="lg lg-curiosity"></i>curiosity</span><span class="dim">bright = often recalled · faint = fading</span>`;
+    <span><i class="lg lg-curiosity"></i>curiosity</span><span class="dim">bright = often recalled · faint = fading</span>
+    <span class="dim">lines: stored edges, brighter = more similar · dashed = similar meaning · dim node = no knowledge yet</span>`;
   root.appendChild(legend);
 
   // ── renderer / scene ─────────────────────────────────────── //
@@ -177,9 +189,11 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
   // "tree": connected topics as top-down tree diagrams (server-computed positions).
   // In tree mode the layout depends on the whole graph, so structural events
   // trigger a debounced re-fetch and nodes glide to their new places.
-  let layoutMode = 'tree';
-  // tree (flat diagrams) and cluster (3-D, similar topics close) are laid out by the server
-  function serverLaid(): boolean { return layoutMode === 'tree' || layoutMode === 'cluster'; }
+  let layoutMode = 'graph';
+  // graph (force-directed vector graph), tree (flat diagrams) and cluster (3-D tree, similar
+  // topics close) are laid out by the server: structural events trigger a debounced re-fetch
+  // and the nodes glide to their new places
+  function serverLaid(): boolean { return layoutMode === 'graph' || layoutMode === 'tree' || layoutMode === 'cluster'; }
   let firstFit = true;
   let relayoutTimer = 0;
   function scheduleRelayout(ms = 900): void {
@@ -200,8 +214,11 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
       }
       layer.setSnapshot(snap as GraphSnapshot);
       layoutMode = snap.layout ?? 'semantic';
-      coreLinks = serverLaid() && Array.isArray(snap.core_links) ? snap.core_links : [];
-      // flat tree: re-frame on every change; 3-D cluster: frame once, then leave the camera to the user
+      // graph: Peter's has_subject edges are in snap.edges (drawn from the core by the layer);
+      // tree / cluster: the core lines come from core_links (also only stored edges)
+      coreLinks = (layoutMode === 'tree' || layoutMode === 'cluster') && Array.isArray(snap.core_links) ? snap.core_links : [];
+      warnEl.style.display = snap.cognition && snap.cognition.semantic_ok === false ? '' : 'none';
+      // flat tree: re-frame on every change; 3-D graph / cluster: frame once, then leave the camera to the user
       if (serverLaid() && (layoutMode === 'tree' || firstFit)) {
         rig.fitTo((snap as GraphSnapshot).nodes.map(n => n.position), firstFit ? 0 : 900, layoutMode === 'tree');
         firstFit = false;
@@ -263,12 +280,28 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
         if (pa && pb) { effects.pulse([pa, pb], 0xc9b3ff, 420); layer.flash(b, 0.7); }
       }
     }, first);
+    // record-level vector links recall followed: a teal pulse from the hit's topic into the
+    // neighbour collection whose record it pulled, and that neighbour flashes
+    const vlinks = (ev['vector_links'] as VectorLink[] | undefined) ?? [];
+    const vdelay = first + (hops.length ? 460 : 0);
+    if (vlinks.length) {
+      window.setTimeout(() => {
+        const done = new Set<string>();
+        for (const vl of vlinks) {
+          const key = `${vl.from_node}>${vl.to_node}`;
+          if (done.has(key)) continue;
+          done.add(key);
+          const pa = layer.getPos(vl.from_node), pb = layer.getPos(vl.to_node);
+          if (pa && pb) { effects.pulse([pa, pb], 0x5fe3c0, 380); layer.flash(vl.to_node, 0.5 + 0.5 * vl.similarity); }
+        }
+      }, vdelay);
+    }
     if (matched[0] && !records.active) {
       const p = layer.getPos(matched[0]);
       if (p) { rig.focus(p, 15, 800); labels.focused = matched[0]; }
     }
     flashCore(0xdff3ff, 0.8);
-    return first + (hops.length ? 460 : 0) + 200;
+    return vdelay + (vlinks.length ? 420 : 0) + 200;
   }
 
   function handle(ev: MindEvent): number {
@@ -356,8 +389,10 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
       }
       case 'edge_drawn': {
         const e: GraphEdge = { id: ev['edge_id'] as string, src: ev['src'] as string, dst: ev['dst'] as string,
-          relation: ev['relation'] as string };
-        if (!layer.getPos(e.src) || !layer.getPos(e.dst)) return 0;   // e.g. source nodes are not drawn
+          relation: ev['relation'] as string,
+          weight: typeof ev['weight'] === 'number' ? ev['weight'] as number : null, primary: Boolean(ev['primary']) };
+        const known = (id: string) => id === SELF_ID || Boolean(layer.getPos(id));
+        if (!known(e.src) || !known(e.dst)) return 0;   // e.g. source nodes are not drawn
         layer.addEdge(e, true);
         scheduleRelayout();
         return 260;
@@ -368,8 +403,9 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
         const pos = nearPos(topic, 2.2);
         layer.upsertNode({ id, kind: 'curiosity', label: String(ev['question'] ?? ''), style: CURIOSITY_STYLE,
           position: pos }, true);
-        if (topic) {
-          layer.addEdge({ id: `${id}->${topic}`, src: id, dst: topic, relation: 'curious_about' }, true);
+        const edgeId = ev['edge_id'] as string | null | undefined;
+        if (topic && edgeId) {   // only the stored curious_about edge, never a drawn-only line
+          layer.addEdge({ id: edgeId, src: id, dst: topic, relation: 'curious_about' }, true);
           const topPos = layer.getPos(topic);
           const curPos = layer.getPos(id);
           if (topPos && curPos) effects.pulse([topPos, curPos], 0xffe07c, 320);
@@ -402,6 +438,15 @@ export async function mount(root: HTMLElement, socket: PeterSocket): Promise<voi
         window.setTimeout(updateStats, 1000);
         scheduleRelayout(1100);
         return 950;
+      }
+      case 'nodes_merged': {
+        const gone = ev['merged'] as string;
+        layer.flash(ev['keeper'] as string, 1);
+        layer.removeNode(gone, true);
+        if (inspector.nodeId === gone) inspector.hide();
+        say(`Merged "${String(ev['merged_label'] ?? '')}" into "${String(ev['label'] ?? '')}"`);
+        scheduleRelayout(900);
+        return 600;
       }
       case 'layout_updated': {
         if (serverLaid()) { scheduleRelayout(); return 0; }

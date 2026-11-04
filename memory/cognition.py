@@ -54,6 +54,16 @@ class CognitiveMemory:
         self.resolver = EntityResolver(vector, graph, router=router)
         # Peter's own node, main subjects under it, similarity links between topics
         self.hierarchy = Hierarchy(vector, graph, knowledge=self.knowledge)
+        # Edges grounded in the vectors: weights, record-level links, similar_to kNN (Part C)
+        from memory.vector_graph import VectorGraph
+        self.vgraph = VectorGraph(vector, graph, knowledge=self.knowledge)
+        self.hierarchy.vgraph = self.vgraph
+        self.knowledge.on_linked = self.vgraph.weight_data
+        self.knowledge.after_linked = lambda eid, s, d, rel: (
+            self.vgraph.link_records(eid, graph.get_node(s), graph.get_node(d))
+            if rel != "has_subject" and graph.get_node(s) and graph.get_node(d) else 0)
+        self.knowledge.on_records_changed = self.vgraph.on_records_changed
+        self.knowledge.on_refreshed = self.vgraph.refresh_node
         self.knowledge.on_created = self.hierarchy.link_similar
         self.graph_recall = GraphRecall(vector, graph, self.resolver, self.usage, hierarchy=self.hierarchy)
         self.sufficiency = SufficiencyChecker(router=router)
@@ -63,10 +73,21 @@ class CognitiveMemory:
         self._inflight: set = set()
         self._lock = threading.Lock()
         self.last_research_thread: Optional[threading.Thread] = None
+        # Existing users' graphs: alias keys, hierarchy repair, alias index (once per graph)
+        from memory.upgrade import run_upgrades
+        run_upgrades(self)
 
     @property
     def user_id(self) -> str:
         return self.graph.user_id
+
+    @property
+    def semantic_ok(self) -> bool:
+        """False when embeddings are the random-hash fallback: similarity is meaningless."""
+        try:
+            return bool(self.vector.semantic_ok)
+        except Exception:
+            return True
 
     @property
     def enabled(self) -> bool:
@@ -122,6 +143,14 @@ class CognitiveMemory:
         """
         if not primary_id or self.graph.get_node(primary_id) is None:
             return
+        hubs: List[str] = []
+        try:
+            self._link_context(result, primary_id, turn_id, hubs)
+        finally:
+            if hubs:
+                self.fill_hubs_now(hubs, turn_id=turn_id)     # Part B: never an empty hub
+
+    def _link_context(self, result: GraphRecallResult, primary_id: str, turn_id: str, hubs: List[str]) -> None:
         for n in result.matched_nodes:
             if n["id"] != primary_id:
                 self.knowledge.link(primary_id, n["id"], "related_to", turn_id=turn_id)
@@ -136,6 +165,7 @@ class CognitiveMemory:
                 if hub["id"] != primary_id:
                     self.knowledge.link(hub["id"], primary_id, "abstracts", turn_id=turn_id)
                     under = hub["id"]
+                    hubs.append(hub["id"])
             except Exception as e:
                 logger.debug(f"CognitiveMemory: category hub skipped: {e}")
         # Main subject ("Writing", "Investing"): the top of the tree, linked to Peter himself
@@ -146,21 +176,30 @@ class CognitiveMemory:
                 self.hierarchy.mark_subject(top, turn_id=turn_id)
                 if top["id"] != under:
                     self.knowledge.link(top["id"], under, "abstracts", turn_id=turn_id)
+                hubs.append(top["id"])
             except Exception as e:
                 logger.debug(f"CognitiveMemory: subject hub skipped: {e}")
 
-    def attach_orphans(self, turn_id: str = "", limit: int = 12) -> int:
+    def attach_orphans(self, turn_id: str = "", limit: int = 12, budget: Any = None,
+                       created: Optional[List[str]] = None) -> int:
         """Every topic must hang under a main subject that is linked to Peter.
 
         Finds trees whose top is not a main subject (a topic or question the
         resolver could not place, a hub made during sleep) and puts them under a
         subject: an existing subject when the topic is close to one, otherwise one
-        named by the LLM. Returns how many trees were attached."""
+        named by the LLM. Returns how many trees were attached.
+
+        ``budget`` (sleep): a new subject's collection counts against the cycle's
+        CollectionBudget; once it is used up, trees wait for the next cycle unless an
+        existing subject fits. ``created`` collects the collections made."""
+        from memory.vector_store import BudgetExceeded
         if not cognition_config()["resolver"].get("link_category", True):
             return 0
-        from memory.mind_view import GRAPH_KINDS, _AGENT_NAMES
+        from memory.mind_view import _AGENT_NAMES
         from memory.tree_layout import build_forest
-        nodes = [n for n in self.graph.all_nodes(GRAPH_KINDS)
+        # Only knowledge (topics and hubs) hangs under subjects; questions stay with their
+        # topic (curious_about) and skills are not topics at all
+        nodes = [n for n in self.graph.all_nodes(["entity", "abstraction"])
                  if n.get("status") != "pruned" and (n.get("label") or "").strip().lower() not in _AGENT_NAMES]
         if not nodes:
             return 0
@@ -180,6 +219,7 @@ class CognitiveMemory:
             return None
 
         done = 0
+        filled: List[str] = []
         for r in roots:
             if r in subjects or done >= limit:
                 continue
@@ -201,12 +241,18 @@ class CognitiveMemory:
                 name = self.resolver.subject_for(label, [s["label"] for s in subjects.values()])
                 if name and name.lower() != label.strip().lower():
                     try:
-                        top, _ = self.knowledge.ensure_node(name, kind="abstraction", turn_id=turn_id,
-                                                            data={"role": "subject"})
+                        top, made = self.knowledge.ensure_node(name, kind="abstraction", turn_id=turn_id,
+                                                               data={"role": "subject"}, budget=budget)
+                        if made and created is not None:
+                            created.append(top["collection"])
                         self.hierarchy.mark_subject(top, turn_id=turn_id)
                         top = self.graph.get_node(top["id"]) or top
                         subjects[top["id"]] = top
                         target = top["id"]
+                    except BudgetExceeded:
+                        logger.info(f"CognitiveMemory: no collection budget left for subject '{name}'; "
+                                    f"'{label}' waits for the next cycle")
+                        continue
                     except Exception as e:
                         logger.debug(f"CognitiveMemory: subject for '{label}' skipped: {e}")
                 elif name and name.lower() == label.strip().lower():
@@ -216,11 +262,133 @@ class CognitiveMemory:
                     done += 1
                     continue
             if target and target != r:
-                self.knowledge.link(target, r, "abstracts", turn_id=turn_id)
-                done += 1
+                eid, _ = self.knowledge.link(target, r, "abstracts", turn_id=turn_id)
+                if eid:
+                    done += 1
+                    filled.append(target)
+        if filled:
+            self.fill_hubs_now(filled, turn_id=turn_id)
         if done:
             emit("layout_updated", user_id=self.user_id, turn_id=turn_id, moves=[])
         return done
+
+    # ------------------------------------------------------------------ Part B: every node is filled
+
+    def is_hub(self, node: Dict[str, Any]) -> bool:
+        if node.get("kind") == "abstraction" or _is_subject(node):
+            return True
+        return any(e["relation"] == "abstracts" and e["src"] == node["id"] for e in self.graph.edges_of(node["id"]))
+
+    def record_count(self, node: Dict[str, Any]) -> int:
+        ns = node.get("collection")
+        return self.vector.count(ns) if ns and self.vector.has_collection(ns) else 0
+
+    def own_record_count(self, node: Dict[str, Any]) -> int:
+        """Records the node learned itself (not copies aggregated from its members)."""
+        n = self.record_count(node)
+        if not n:
+            return 0
+        return n - len(self.vector.get_where(node["collection"], {"kind": "migrated"}))
+
+    def aggregate_hub(self, hub: Dict[str, Any], turn_id: str = "") -> int:
+        """A hub/subject holds knowledge of its own: each member's most central records
+        (closest to the member's centroid), copied with provenance (origin_id / origin_node),
+        deduped, at most ``fill.max_hub_records``. Returns how many records were copied."""
+        import numpy as np
+        fcfg = cognition_config()["fill"]
+        per, cap = int(fcfg.get("member_records", 3)), int(fcfg.get("max_hub_records", 40))
+        if per <= 0 or not hub.get("collection"):
+            return 0
+        kids = [self.graph.get_node(e["dst"]) for e in sorted(self.graph.edges_of(hub["id"]), key=lambda e: e["dst"])
+                if e["relation"] == "abstracts" and e["src"] == hub["id"]]
+        room = cap - self.record_count(hub)
+        copied = 0
+        for kid in kids:
+            if room <= 0:
+                break
+            if not kid or kid.get("kind") not in ("entity", "abstraction") or not kid.get("collection"):
+                continue
+            recs = [r for r in self.vector.get_all_records(kid["collection"]) if r.get("embedding")]
+            if not recs:
+                continue
+            arr = np.asarray([r["embedding"] for r in recs], dtype=float)
+            arr /= np.maximum(np.linalg.norm(arr, axis=1, keepdims=True), 1e-12)
+            c = arr.mean(axis=0)
+            order = np.argsort(-(arr @ c), kind="stable")
+            chosen = [recs[int(i)] for i in order[: min(per, room) + per]]   # spares for already-copied ones
+            n = self.knowledge.copy_records(hub, kid, chosen, limit=min(per, room))
+            if n:
+                copied += n
+                room -= n
+                emit("embedding_migrated", user_id=self.user_id, turn_id=turn_id, from_node=kid["id"],
+                     to_node=hub["id"], count=n, reason="aggregate")
+        if copied:
+            self.knowledge.refresh_stats(hub)
+        return copied
+
+    def overview_question(self, node: Dict[str, Any]) -> str:
+        label = node.get("label") or ""
+        if _is_subject(node):
+            return f"{label}: overview, main areas and key concepts"
+        if self.is_hub(node):
+            return f"{label}: overview, main areas"
+        return f"What are the key facts about {label}?"
+
+    def fill_node(self, node: Dict[str, Any], turn_id: str = "", budget: Any = None,
+                  research: bool = True) -> Dict[str, Any]:
+        """Give a node knowledge: hubs aggregate their members first; then, if the collection
+        is still thin and research is available, research it (an overview query suited to its
+        level), into this node's own collection (no new collection is made)."""
+        out = {"node_id": node["id"], "aggregated": 0, "researched": 0}
+        if self.is_hub(node):
+            out["aggregated"] = self.aggregate_hub(node, turn_id=turn_id)
+        thin = int(cognition_config()["fill"].get("thin_records", 3))
+        if (research and self.research is not None and cognition_config()["research"].get("enabled", True)
+                and self.own_record_count(node) < thin):
+            try:
+                r = self.research.research(node["label"], question=self.overview_question(node), turn_id=turn_id,
+                                           budget=budget, target_node=self.graph.get_node(node["id"]) or node)
+                out["researched"] = r.records_stored
+            except Exception as e:
+                logger.warning(f"CognitiveMemory: filling '{node.get('label')}' failed: {e}")
+        return out
+
+    def fill_hubs_now(self, hub_ids: List[str], turn_id: str = "") -> None:
+        """Chat: hubs/subjects made for this turn get their members' knowledge at once; with
+        fill.research_in_chat they are also researched now (in the research thread when async).
+        Otherwise the next sleep's fill step researches them (it finds every thin collection)."""
+        research_now = bool(cognition_config()["fill"].get("research_in_chat", False))
+        if research_now and self.async_research and threading.current_thread().name != "ResearchThread":
+            # chat must not wait for web research: aggregate now, research in the background
+            ids = list(dict.fromkeys(hub_ids))
+            for hid in ids:
+                node = self.graph.get_node(hid)
+                if node is not None:
+                    try:
+                        self.aggregate_hub(node, turn_id=turn_id)
+                    except Exception as e:
+                        logger.debug(f"CognitiveMemory: aggregating hub {hid} failed: {e}")
+
+            def run() -> None:
+                for hid in ids:
+                    node = self.graph.get_node(hid)
+                    if node is not None:
+                        self.fill_node(node, turn_id=turn_id)
+            th = threading.Thread(target=run, daemon=True, name="ResearchThread")
+            self.last_research_thread = th
+            th.start()
+            return
+        for hid in dict.fromkeys(hub_ids):
+            node = self.graph.get_node(hid)
+            if node is None:
+                continue
+            try:
+                if research_now:
+                    self.fill_node(node, turn_id=turn_id)
+                elif self.record_count(node) < int(cognition_config()["fill"].get("thin_records", 3)):
+                    self.aggregate_hub(node, turn_id=turn_id)
+            except Exception as e:
+                logger.debug(f"CognitiveMemory: filling hub {hid} failed: {e}")
 
     def queue_secondary(self, result: GraphRecallResult, primary_label: str, primary_id: Optional[str],
                         turn_id: str = "") -> None:

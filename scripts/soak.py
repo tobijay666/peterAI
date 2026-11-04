@@ -5,6 +5,7 @@ Outputs validation/soak.md.
 """
 import sys
 from pathlib import Path
+from typing import Any, Dict
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.clock import FakeClock

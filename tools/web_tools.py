@@ -1,9 +1,8 @@
 """Web search, URL fetching, and scholarly query tools."""
 
-import json
 import urllib.parse
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List
+from typing import Dict, List
 import requests
 from core.interfaces import ToolResult
 from core.logger import logger

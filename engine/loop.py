@@ -7,7 +7,6 @@ v1.2 additions:
   - TTS announcement when a background task compiles.
 """
 
-import sys
 import threading
 from typing import Optional
 
@@ -18,7 +17,7 @@ from core.guardrails import GuardrailManager
 from core.interfaces import TaskStatus
 from core.logger import logger
 from engine import task_compiler, task_store
-from engine.task_queue import TaskQueue, TaskWorkerPool
+from engine.task_queue import TaskWorkerPool
 from llm.router import LLMRouter
 from tts.service import TTSService
 

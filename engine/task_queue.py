@@ -13,11 +13,10 @@ by re-queuing dependant steps once their prerequisites finish).
 
 import queue
 import threading
-import time
 from typing import TYPE_CHECKING, Dict, Optional
 
 from core.events import event_bus
-from core.interfaces import TaskPlan, TaskStatus
+from core.interfaces import TaskStatus
 from core.logger import logger
 from core.clock import Clock, SystemClock
 from engine import task_store

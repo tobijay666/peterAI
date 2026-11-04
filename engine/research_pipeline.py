@@ -365,6 +365,7 @@ class ResearchPipeline:
             return out
 
         now = self.knowledge._clock.now()
+        merged = self._against_existing(node, merged, out)
         for g in merged:
             first = g["sources"][0]
             meta = {
@@ -395,10 +396,64 @@ class ResearchPipeline:
         logger.info(f"ResearchPipeline: '{topic}' -> {out.records_stored} records from {out.pages_fetched} pages")
         return out
 
+    def _against_existing(self, node: Dict[str, Any], merged: List[Dict[str, Any]],
+                          out: ResearchOutcome) -> List[Dict[str, Any]]:
+        """Researching a topic again must not store the same facts twice: a claim at least
+        ``corroboration_similarity`` close to a record already in the collection is not
+        stored; if it comes from new domains, the existing record gains them as sources
+        (and confidence / trust rise as in corroborate)."""
+        ns = node.get("collection")
+        if not ns or not merged:
+            return merged
+        existing = [r for r in self.knowledge.vector.get_all_records(ns) if r.get("embedding")]
+        if not existing:
+            return merged
+        import numpy as np
+        E = np.asarray([r["embedding"] for r in existing], dtype=float)
+        E /= np.maximum(np.linalg.norm(E, axis=1, keepdims=True), 1e-12)
+        thr = float(self.cfg["corroboration_similarity"])
+        fresh = []
+        for g in merged:
+            v = np.asarray(g["embedding"], dtype=float)
+            v /= max(float(np.linalg.norm(v)), 1e-12)
+            sims = E @ v
+            j = int(np.argmax(sims))
+            if float(sims[j]) < thr:
+                fresh.append(g)
+                continue
+            out.claims_dropped += 1          # already known
+            rec = existing[j]
+            meta = rec.get("metadata") or {}
+            try:
+                old_sources = json.loads(meta.get("sources") or "[]")
+            except Exception:
+                old_sources = []
+            if not old_sources and meta.get("source_url"):
+                old_sources = [{"url": meta["source_url"], "title": meta.get("source_title", "")}]
+            urls = {s.get("url") for s in old_sources}
+            added = [s for s in g["sources"] if s["url"] not in urls]
+            if added:
+                sources = old_sources + added
+                nd = len({domain_of(s["url"]) for s in sources})
+                self.knowledge.vector.update_metadata(
+                    ns, rec["id"], sources=json.dumps(sources)[:4000], domains=nd,
+                    confidence=round(min(0.9, 0.4 + 0.2 * (nd - 1)), 2),
+                    trust="tool_verified" if nd >= 2 else str(meta.get("trust", "untrusted_web")))
+        return fresh
+
     def _nearest_existing(self, topic: str) -> Optional[Dict[str, Any]]:
+        """Budget exhausted: an existing node that really IS this topic (exact name or an
+        entity-index match at least as close as the resolver's own floor), else None.
+        Facts are never filed under an unrelated node; the caller defers instead."""
+        exact = self.knowledge.find_node(topic)
+        if exact and exact.get("collection"):
+            return exact
+        floor = float(cognition_config()["resolver"]["index_min_similarity"])
         for hit in self.knowledge.vector.search_entities(topic, n_results=1):
+            if float(hit.get("score", 0.0)) < floor:
+                break
             node = self.knowledge.graph.get_node(hit["node_id"])
-            if node and node.get("collection"):
+            if node and node.get("collection") and node.get("status") != "pruned":
                 return node
         return None
 

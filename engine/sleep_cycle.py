@@ -21,7 +21,6 @@ Every step supports dry_run (shadow mode) and reports what it would do.
 """
 from __future__ import annotations
 
-import json
 import math
 import uuid
 from dataclasses import dataclass, field
@@ -34,6 +33,21 @@ from memory.vector_store import BudgetExceeded, CollectionBudget
 
 COGNITIVE_KINDS = ["entity", "abstraction"]
 _DAY = 86400.0
+
+
+def _symbol_signature(label: str) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """The digit runs and symbol characters of a label. Two labels that differ in these are
+    different topics however close their words: C / C++ / C# / "C ++", Python 2 / Python 3,
+    Windows 10 / Windows 11."""
+    import re
+    low = (label or "").lower()
+    digits = tuple(sorted(re.findall(r"\d+", low)))
+    syms = tuple(sorted(c for c in low if not c.isalnum() and not c.isspace()))
+    return digits, syms
+
+
+def _symbol_compatible(a_label: str, b_label: str) -> bool:
+    return _symbol_signature(a_label) == _symbol_signature(b_label)
 
 
 def _unit(v: List[float]) -> List[float]:
@@ -57,6 +71,13 @@ class SleepReport:
     researched: List[Dict[str, Any]] = field(default_factory=list)
     collections_created: List[str] = field(default_factory=list)
     paused: bool = False
+    repaired: int = 0
+    merged: List[Dict[str, Any]] = field(default_factory=list)
+    filled: List[Dict[str, Any]] = field(default_factory=list)
+    copies_removed: int = 0
+    copies_updated: int = 0
+    counts_fixed: int = 0
+    vectors: Dict[str, int] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -64,7 +85,9 @@ class SleepReport:
             "cycle_id": self.cycle_id, "dry_run": self.dry_run, "faded": self.faded, "pruned": self.pruned,
             "abstractions": self.abstractions, "migrated": self.migrated, "gaps_flagged": self.gaps_flagged,
             "researched": self.researched, "collections_created": self.collections_created,
-            "paused": self.paused, "errors": self.errors,
+            "paused": self.paused, "repaired": self.repaired, "merged": self.merged, "filled": self.filled, "copies_removed": self.copies_removed,
+            "copies_updated": self.copies_updated, "counts_fixed": self.counts_fixed, "vectors": self.vectors,
+            "errors": self.errors,
         }
 
 
@@ -130,12 +153,23 @@ class SleepCycle:
                 protected.add(x)
         return protected
 
+    def _structural(self, nodes: List[Dict[str, Any]]) -> Set[str]:
+        """Never pruned: main subjects (linked to Peter) and any node that still abstracts a
+        live topic (a hub is only as dead as its last child)."""
+        from memory.hierarchy import is_subject
+        live = {n["id"] for n in nodes}
+        keep = {n["id"] for n in nodes if is_subject(n)}
+        for e in self.graph.list_edges(list(live)):
+            if e["relation"] == "abstracts" and e["src"] in live and e["dst"] in live:
+                keep.add(e["src"])
+        return keep
+
     def _prune_candidates(self) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, float]]]:
         p = self.cfg["prune"]
         now = self._clock.now()
         scored = self.usage.recompute_all(COGNITIVE_KINDS, persist=not self.dry_run)
         nodes = [n for n in self.graph.all_nodes(COGNITIVE_KINDS) if n.get("status") != "pruned"]
-        protected = self._protected_bridges(nodes)
+        protected = self._protected_bridges(nodes) | self._structural(nodes)
         out = []
         for n in nodes:
             if n.get("pinned") or n["id"] in protected:
@@ -192,6 +226,11 @@ class SleepCycle:
         for s in self.graph.get_nodes_by_kind("source"):
             if self.graph.degree(s["id"]) == 0:
                 self.graph.delete_node(s["id"])
+        # question nodes whose queue item is gone or finished (older graphs left them behind)
+        live = {f"cur_{r['id']}" for r in self._curiosity_rows("WHERE status = 'pending' OR status = 'researching'")}
+        for c in self.graph.get_nodes_by_kind("curiosity"):
+            if c["id"] not in live and self.graph.delete_node(c["id"]):
+                emit("node_pruned", user_id=self.user_id, node_id=c["id"], label=c.get("label"), collection=None)
         for c in self.graph.list_collections():
             if c.get("node_id") and self.graph.get_node(c["node_id"]) is None:
                 self.vector.drop_collection(c["name"])
@@ -200,6 +239,10 @@ class SleepCycle:
         for ns in self.vector.list_knowledge_namespaces():
             if ns not in registered and self.vector.count(ns) == 0:
                 self.vector.drop_collection(ns)
+
+    def _curiosity_rows(self, where: str) -> List[Dict[str, Any]]:
+        with self.graph._get_connection() as conn:
+            return [dict(r) for r in conn.execute(f"SELECT * FROM curiosity_queue {where};").fetchall()]
 
     # ================================================================== B. abstraction
 
@@ -287,7 +330,12 @@ class SleepCycle:
         a = self.cfg["abstraction"]
         floor = float(a["migrate_min_similarity"])
         per_member = int(a["max_records_per_member"])
-        for g in self._groups():
+        groups = self._groups()
+        with self.knowledge.batch():      # D3: one recount at the end, weights/links done in maintain
+            self._abstract_groups(groups, floor, per_member)
+
+    def _abstract_groups(self, groups: List[Dict[str, Any]], floor: float, per_member: int) -> None:
+        for g in groups:
             labels = [m["label"] for m in g["members"]]
             name = self._name_group(labels)
             existing = self.knowledge.find_node(name)
@@ -311,36 +359,169 @@ class SleepCycle:
             else:
                 node = existing
             plan["node_id"] = node["id"]
-            # Embedding migration: copy (D1) the records that sit close to the group's centroid
-            already = {r["metadata"].get("origin_id") for r in self.vector.get_all_records(node["collection"])}
+            # Embedding migration: copy (D1) the records that sit close to the group's centroid,
+            # with provenance, never twice (same origin or same text) - KnowledgeStore.copy_records
             for m in g["members"]:
                 recs = self.vector.get_all_records(m["collection"])
                 ranked = sorted(((_dot(_unit(r["embedding"]), g["centroid"]), r) for r in recs if r.get("embedding")),
                                 key=lambda t: -t[0])
-                copied = 0
-                for sim, r in ranked:
-                    if copied >= per_member or sim < floor:
-                        break
-                    if r["id"] in already:
-                        continue
-                    meta = {k: v for k, v in (r["metadata"] or {}).items()
-                            if k not in ("access_count", "last_accessed", "created_at", "agent", "node_id")}
-                    meta.update({"origin_collection": m["collection"], "origin_id": r["id"], "origin_node": m["id"],
-                                 "kind": "migrated"})
-                    self.knowledge.add_record(node, r["document"], meta, embedding=r["embedding"])
-                    already.add(r["id"])
-                    copied += 1
+                chosen = [r for sim, r in ranked if sim >= floor][:per_member]
+                copied = self.knowledge.copy_records(node, m, chosen)
                 if copied:
                     plan["migrated"] += copied
                     self.report.migrated += copied
                     emit("embedding_migrated", user_id=self.user_id, from_node=m["id"], to_node=node["id"],
                          count=copied, cycle_id=self.cycle_id)
-            for m in g["members"]:
-                self.knowledge.link(node["id"], m["id"], "abstracts")
-            for x, y, _ in g["pairs"]:
-                self.knowledge.link(x, y, "bridges")
+            # Bulk-create the hub->member (abstracts) and member<->member (bridges) edges in one
+            # transaction (D3): the hub is fresh and the members are entities, so there is no cycle
+            # or subject to guard and no per-edge validation query is needed. Weights and record
+            # links are filled by the end-of-sleep refresh_all, like every other sleep edge.
+            self._bulk_link(node, g["members"], g["pairs"])
             self.knowledge.refresh_stats(node)
             self.report.abstractions.append(plan)
+
+    def _bulk_link(self, hub: Dict[str, Any], members: List[Dict[str, Any]],
+                   pairs: List[Tuple[str, str, float]]) -> None:
+        member_ids = [m["id"] for m in members]
+        scope = [hub["id"]] + member_ids
+        existing = self.graph.list_edges(scope)
+        has_parent = {m: False for m in member_ids}        # does the member already have a primary hub?
+        present: Set[Tuple[str, str, str]] = set()
+        for e in existing:
+            present.add((e["src"], e["dst"], e["relation"]))
+            if e["relation"] == "abstracts" and e["dst"] in has_parent and (e.get("data") or {}).get("primary"):
+                has_parent[e["dst"]] = True
+        triples: List[Tuple[str, str, str, Any]] = []
+        drawn: List[Tuple[str, str, str, Any]] = []
+        for mid in member_ids:
+            if (hub["id"], mid, "abstracts") in present or hub["id"] == mid:
+                continue
+            data = {"primary": True} if not has_parent[mid] else None
+            has_parent[mid] = True
+            triples.append((hub["id"], mid, "abstracts", data))
+            drawn.append((hub["id"], mid, "abstracts", data))
+            present.add((hub["id"], mid, "abstracts"))
+        for x, y, _ in pairs:
+            if x == y:
+                continue
+            if (x, y, "bridges") in present or (y, x, "bridges") in present:
+                continue
+            # a hub and its own member are joined by abstracts, never also by a symmetric bridge
+            if (hub["id"], x, "abstracts") in present or (hub["id"], y, "abstracts") in present:
+                if x in member_ids and y in member_ids:
+                    pass   # both are members: a bridge between two members is fine
+            triples.append((x, y, "bridges", None))
+            drawn.append((x, y, "bridges", None))
+            present.add((x, y, "bridges"))
+        eids = self.graph.link_many(triples)
+        for eid, (src, dst, rel, data) in zip(eids, drawn):
+            emit("edge_drawn", user_id=self.user_id, edge_id=eid, src=src, dst=dst, relation=rel,
+                 weight=None, primary=bool((data or {}).get("primary")))
+
+    # ================================================================== B2. near-duplicate merge
+
+    def merge_duplicates(self) -> None:
+        """Two topics that are the same thing under two names ('Colombo Stock Exchange' /
+        'Stock Exchange of Colombo') are merged: label similarity >= merge.label_similarity
+        and, when both have facts, centroid similarity >= merge.centroid_similarity."""
+        if not self._phase("merge"):
+            return
+        from memory.hierarchy import is_subject
+        m = self.cfg.get("merge", {}) or {}
+        lab_min, cen_min = float(m.get("label_similarity", 0.92)), float(m.get("centroid_similarity", 0.9))
+        cap = int(m.get("max_per_cycle", 5))
+        nodes = [n for n in self.graph.all_nodes(COGNITIVE_KINDS)
+                 if n.get("status") != "pruned" and n.get("collection") and not is_subject(n)]
+        if len(nodes) < 2 or cap <= 0:
+            return
+        import numpy as np
+        L = np.asarray(self.vector.embed([n.get("label") or "" for n in nodes]), dtype=float)
+        L /= np.maximum(np.linalg.norm(L, axis=1, keepdims=True), 1e-12)
+        S = L @ L.T
+        cents = {n["id"]: self.vector.centroid(n["collection"]) for n in nodes}
+        gone: Set[str] = set()
+        pairs = sorted(((float(S[i, j]), i, j) for i in range(len(nodes)) for j in range(i + 1, len(nodes))
+                        if S[i, j] >= lab_min and nodes[i]["kind"] == nodes[j]["kind"]), key=lambda t: -t[0])
+        done = 0
+        for sim, i, j in pairs:
+            a, b = nodes[i], nodes[j]
+            if done >= cap or a["id"] in gone or b["id"] in gone:
+                continue
+            # D1/D8: never fold topics that differ only by symbols or digits, even at label
+            # similarity 1.0 under a bag-of-words embedder (C / C++ / C# / "C ++", Python 2/3)
+            if not _symbol_compatible(a.get("label") or "", b.get("label") or ""):
+                continue
+            ca, cb = cents.get(a["id"]), cents.get(b["id"])
+            # D1: require real centroid evidence on BOTH sides — never merge on the label alone
+            # (an empty "C#" must not fold into "C"); the vectors must actually agree
+            if ca is None or cb is None or _dot(ca, cb) < cen_min:
+                continue
+            if self.knowledge.is_descendant(a["id"], of=b["id"]) or self.knowledge.is_descendant(b["id"], of=a["id"]):
+                continue                          # a hub and its own member are not duplicates
+            def rank(n):
+                return (not n.get("pinned"), -self.vector.count(n["collection"]), -int(n.get("access_count") or 0),
+                        float(n.get("created_at") or 0.0), n["id"])
+            keeper, loser = sorted((a, b), key=rank)
+            if loser.get("pinned"):
+                continue
+            entry = {"keeper": keeper["id"], "merged": loser["id"], "label_similarity": round(sim, 4)}
+            if not self.dry_run:
+                try:
+                    entry.update(self.knowledge.merge_nodes(keeper, loser, dedupe_similarity=float(
+                        cognition_config()["research"].get("corroboration_similarity", 0.9))))
+                except Exception as e:
+                    self.report.errors.append(f"merge {loser['id']} -> {keeper['id']}: {e}")
+                    continue
+            gone.add(loser["id"])
+            self.report.merged.append(entry)
+            done += 1
+
+    # ================================================================== B3. fill empty / thin hubs
+
+    def fill(self) -> None:
+        """Every node is a vector store with knowledge (Part B). Hubs and subjects whose
+        collection is empty or thin first take their members' most central records, then up to
+        ``fill.max_per_cycle`` of them are researched with an overview query into their own
+        collection. Thin topics (and hubs over the cap) are queued by the gap scan that follows,
+        so nothing stays empty silently."""
+        if not self._phase("fill"):
+            return
+        fcfg = cognition_config()["fill"]
+        thin, cap = int(fcfg.get("thin_records", 3)), int(fcfg.get("max_per_cycle", 3))
+        from memory.hierarchy import is_subject
+        hubs = []
+        for n in self.graph.all_nodes(COGNITIVE_KINDS):
+            if n.get("status") == "pruned" or not n.get("collection") or not self.cog.is_hub(n):
+                continue
+            count = self.cog.own_record_count(n)       # knowledge of its own, copies not counted
+            if count < thin:
+                hubs.append((count, n))
+        # subjects first, then the emptiest, then the most used
+        hubs.sort(key=lambda t: (not is_subject(t[1]), t[0], -float(t[1].get("usage_score") or 0.0), t[1]["id"]))
+        if self.dry_run:
+            self.report.filled.extend({"node_id": n["id"], "before": c, "aggregated": 0, "researched": 0}
+                                      for c, n in hubs)
+            return
+        with self.knowledge.batch():      # D3: bulk record inserts recount once; links done in maintain
+            self._fill_hubs(hubs, cap)
+
+    def _fill_hubs(self, hubs: List[Tuple[int, Dict[str, Any]]], cap: int) -> None:
+        researched = 0
+        for count, n in hubs:
+            if self.should_pause():
+                self.report.paused = True
+                return
+            entry = {"node_id": n["id"], "before": count, "aggregated": 0, "researched": 0}
+            do_research = researched < cap and self.cog.research is not None
+            try:
+                r = self.cog.fill_node(n, budget=self.budget, research=do_research)
+            except Exception as e:
+                self.report.errors.append(f"fill {n['id']}: {e}")
+                continue
+            if do_research:
+                researched += 1
+            entry.update(aggregated=r["aggregated"], researched=r["researched"], after=self.cog.record_count(n))
+            self.report.filled.append(entry)
 
     # ================================================================== C. gaps + research
 
@@ -396,6 +577,12 @@ class SleepCycle:
                 curiosity.complete(item["id"], ok=False)
                 continue
             ok = out.records_stored > 0
+            if out.deferred:
+                # budget used up: the item waits for the next cycle (never filed under a wrong node)
+                curiosity.defer(item["id"])
+                self.report.researched.append({"question": item["question"], "topic": topic, "node_id": None,
+                                               "records": 0, "deferred": True})
+                continue
             curiosity.complete(item["id"], ok=ok)
             origin = item.get("topic_node_id")
             if ok and out.node_id and origin and origin != out.node_id and self.graph.get_node(origin):
@@ -418,9 +605,50 @@ class SleepCycle:
         # Whatever sleep learned must hang under a main subject linked to Peter
         if not self.dry_run and hasattr(self.cog, "attach_orphans"):
             try:
-                self.cog.attach_orphans()
+                self.cog.attach_orphans(budget=self.budget, created=self.report.collections_created)
             except Exception as e:
                 self.report.errors.append(f"attach_orphans: {e}")
+
+    # ================================================================== D. maintenance
+
+    def maintain(self) -> None:
+        """Keep the stored graph consistent after everything else changed it:
+        hierarchy repair, stale hub copies, registry record counts."""
+        if not self._phase("maintenance") or self.dry_run:
+            return
+        hier = getattr(self.cog, "hierarchy", None)
+        if hier is not None:
+            try:
+                self.report.repaired += hier.repair()
+            except Exception as e:
+                self.report.errors.append(f"repair: {e}")
+        for n in self.graph.get_nodes_by_kind("abstraction"):
+            if n.get("status") == "pruned" or not n.get("collection"):
+                continue
+            try:
+                r = self.knowledge.refresh_copies(n)
+                self.report.copies_removed += r["removed"]
+                self.report.copies_updated += r["updated"]
+            except Exception as e:
+                self.report.errors.append(f"refresh_copies {n['id']}: {e}")
+        self.reconcile_counts()
+        vg = getattr(self.cog, "vgraph", None)
+        if vg is not None:
+            try:      # edge weights, record-level vector links, Peter's vector, similar_to kNN
+                self.report.vectors = vg.refresh_all()
+            except Exception as e:
+                self.report.errors.append(f"vectors: {e}")
+
+    def reconcile_counts(self) -> int:
+        """Registry record_count == the collection's real size (audit item 12). Returns fixes."""
+        fixed = 0
+        for c in self.graph.list_collections():
+            real = self.vector.count(c["name"])
+            if int(c.get("record_count") or 0) != real:
+                self.graph.update_collection_stats(c["name"], record_count=real)
+                fixed += 1
+        self.report.counts_fixed += fixed
+        return fixed
 
     # ================================================================== layout
 

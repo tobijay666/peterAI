@@ -160,6 +160,8 @@ class EvolutionCoordinator:
         # Step 2b–2c (sleep v2): cross-domain abstraction, then gap scan + background research
         if sleep is not None:
             self._sleep_step(sleep, "abstract", report)
+            self._sleep_step(sleep, "merge_duplicates", report)
+            self._sleep_step(sleep, "fill", report)      # empty / thin hubs: aggregate + overview research
             self._sleep_step(sleep, "scan_gaps", report)
             self._sleep_step(sleep, "research", report)
 
@@ -194,6 +196,7 @@ class EvolutionCoordinator:
             logger.error(f"EvolutionCoordinator: eviction error: {e}")
 
         if sleep is not None:
+            self._sleep_step(sleep, "maintain", report)     # repair, stale copies, counts, vectors
             self._sleep_step(sleep, "relayout", report)
             sr = sleep.report.to_dict()
             report["sleep"] = sr

@@ -6,7 +6,6 @@ Checks env vars and registered tools against catalog and .env.example.
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import yaml
 
 from scripts.gen_docs import (
     gen_tool_catalog,

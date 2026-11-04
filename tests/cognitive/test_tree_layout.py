@@ -75,8 +75,10 @@ def test_every_topic_ends_up_under_a_main_subject(stores):
     cse, _ = cog.knowledge.ensure_node("Colombo Stock Exchange")
     graph.upsert_node("cur_x", kind="curiosity", label="How do equity trust funds work?")
     graph.upsert_node("agent_r", kind="entity", label="researcher")
-    assert cog.attach_orphans() == 2
-    nodes = [n for n in graph.all_nodes(["entity", "abstraction", "curiosity"]) if n["label"] != "researcher"]
+    # Only topics are hung under subjects (audit item 7): the loose question node stays where it is
+    assert cog.attach_orphans() == 1
+    assert not graph.edges_of("cur_x")
+    nodes = [n for n in graph.all_nodes(["entity", "abstraction"]) if n["label"] != "researcher"]
     roots, _ = build_forest(nodes, graph.list_edges([n["id"] for n in nodes]))
     assert len(roots) == 1 and _is_subject(graph.get_node(roots[0]))
     assert graph.get_node(roots[0])["label"] == "Investing"
@@ -113,10 +115,12 @@ def test_cluster_similar_subjects_and_topics_sit_together():
     assert p == cluster_positions(nodes, edges, sem)                    # deterministic
 
 
-def test_cluster_is_default_snapshot_layout(stores):
+def test_graph_is_default_snapshot_layout(stores):
+    # Part D: the default picture is the force-directed vector graph; cluster stays an option
     from memory.cognition import CognitiveMemory
     from memory.mind_view import graph_snapshot
     vector, graph = stores
     cog = CognitiveMemory(vector, graph, router=None, async_research=False)
     cog.knowledge.ensure_node("henna")
-    assert graph_snapshot(cog)["layout"] == "cluster"
+    assert graph_snapshot(cog)["layout"] == "graph"
+    assert graph_snapshot(cog, layout_mode="cluster")["layout"] == "cluster"

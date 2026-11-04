@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Any, Dict, List, Optional
 from core.guardrails import GuardrailManager
 from core.interfaces import AgentState, Message

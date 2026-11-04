@@ -178,7 +178,7 @@ async def snapshot(view: str = "graph", sources: bool = False, ns: Optional[str]
             if cognition is not None:
                 from memory.mind_view import graph_snapshot
                 return {"user_id": user.user_id, "view": "graph", **graph_snapshot(cognition, include_sources=sources,
-                                                                    layout_mode=layout if layout in ("tree", "cluster", "semantic") else None)}
+                                                                    layout_mode=layout if layout in ("graph", "tree", "cluster", "semantic") else None)}
         return await _snapshot_impl(user, ns=ns)
     except Exception as exc:
         tb = traceback.format_exc()

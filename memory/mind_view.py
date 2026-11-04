@@ -36,11 +36,106 @@ def _style_for(node: Dict[str, Any], pct: Dict[str, float]) -> Dict[str, Any]:
     return dict(FIXED_STYLES.get(node["kind"], FIXED_STYLES["skill"]))
 
 
+LAYOUTS = ("graph", "cluster", "tree", "semantic")
+TOPIC_KINDS = ("entity", "abstraction")
+
+
+def _layout_signature(ids: List[str], edges: List[Dict[str, Any]]) -> str:
+    """A hash of the drawn node set and edge set (src|dst|relation). Weights are left out on
+    purpose: a weight refresh must not move the picture. Unchanged signature -> stored positions."""
+    import hashlib
+    h = hashlib.sha1()
+    h.update("\x1f".join(sorted(ids)).encode())
+    h.update(b"\x1e")
+    h.update("\x1f".join(sorted(f"{e['src']}|{e['dst']}|{e['relation']}" for e in edges)).encode())
+    return h.hexdigest()
+
+
+def _graph_layout(cognition: Any, graph: Any, layout: Any, nodes: List[Dict[str, Any]], ids: List[str],
+                  all_edges: List[Dict[str, Any]], self_edges: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Force-directed positions for the "graph" layout, stable between snapshots (D2):
+      * signature unchanged and every node already placed -> return stored positions, no rewrite;
+      * a few new nodes / changed edges -> relax only those and their neighbours (rest pinned);
+      * otherwise (fresh, or most nodes new) -> one convergent deterministic layout.
+    """
+    from memory.graph_layout import graph_positions
+    from memory.hierarchy import SELF_ID
+    layout_edges = all_edges + self_edges
+    previous = {n["id"]: (float(n["gpos_x"]), float(n["gpos_y"]), float(n["gpos_z"]))
+                for n in nodes if n.get("gpos_x") is not None}
+    placed = set(previous)
+    sig = _layout_signature(ids, layout_edges)
+    stored_sig = graph.get_meta("graph_layout_sig")
+    if stored_sig == sig and all(i in placed for i in ids):
+        return previous                                        # nothing changed: hold the picture still
+
+    edge_key = lambda e: f"{e['src']}|{e['dst']}|{e['relation']}"
+    cur_keys = {edge_key(e) for e in layout_edges}
+    old_keys_raw = graph.get_meta("graph_layout_edges")
+    old_keys = set(old_keys_raw.split("\n")) if old_keys_raw else set()
+    changed_edges = cur_keys ^ old_keys if old_keys else cur_keys
+
+    new_nodes = {i for i in ids if i not in placed}
+    initial: Dict[str, Any] = {}
+    for n in nodes:
+        if n["id"] in new_nodes:
+            try:
+                initial[n["id"]] = layout.place(n) if layout is not None else None
+            except Exception:
+                initial[n["id"]] = None
+
+    fresh = not placed or len(new_nodes) > 0.5 * len(ids)
+    if fresh:
+        tree_pos = graph_positions(ids + [SELF_ID], layout_edges, initial, previous, fresh=True)
+    else:
+        # free = new nodes, the endpoints of added/removed edges, and their 1-hop neighbours;
+        # everything else keeps its stored position so the picture does not drift
+        touched = set(new_nodes)
+        for key in changed_edges:
+            s, d, _ = key.split("|", 2)
+            if s in placed or s in new_nodes:
+                touched.add(s)
+            if d in placed or d in new_nodes:
+                touched.add(d)
+        adj: Dict[str, set] = {}
+        for e in layout_edges:
+            adj.setdefault(e["src"], set()).add(e["dst"])
+            adj.setdefault(e["dst"], set()).add(e["src"])
+        free = set(touched)
+        for t in touched:
+            free |= adj.get(t, set())
+        free.discard(SELF_ID)
+        free &= set(ids)
+        if not free:
+            graph.set_meta("graph_layout_sig", sig)            # structure changed but nothing to move
+            graph.set_meta("graph_layout_edges", "\n".join(sorted(cur_keys)))
+            return previous
+        pinned = (placed | new_nodes) - free
+        tree_pos = graph_positions(ids + [SELF_ID], layout_edges, initial, previous,
+                                   pinned=pinned, fresh=False)
+
+    moved = {i: p for i, p in tree_pos.items() if previous.get(i) != p}
+    try:
+        if moved:
+            graph.set_graph_positions(moved)
+        graph.set_meta("graph_layout_sig", sig)
+        graph.set_meta("graph_layout_edges", "\n".join(sorted(cur_keys)))
+    except Exception:
+        pass
+    return tree_pos
+
+
 def graph_snapshot(cognition: Any, include_sources: bool = False,
                    layout_mode: Optional[str] = None) -> Dict[str, Any]:
-    """layout_mode: "cluster" (3-D tree arranged by similarity, default), "tree" (flat
-    top-down tree diagrams) or "semantic" (meaning only, no hierarchy);
-    default from config visual.layout."""
+    """layout_mode: "graph" (3-D force-directed layout of the stored vector graph: springs on
+    stored edges, shorter for more similar nodes, Peter fixed at the origin; default),
+    "cluster" (3-D tree arranged by similarity), "tree" (flat top-down tree diagrams) or
+    "semantic" (meaning only); default from config visual.layout.
+
+    Edges: every stored edge between drawn nodes, with relation, vector weight and the
+    primary flag, plus Peter's own has_subject edges (src ``self_peter``; the view draws
+    Peter as the core sphere at the origin). Nothing is drawn that is not stored."""
+    from memory.hierarchy import SELF_ID
     graph = cognition.graph
     kinds = GRAPH_KINDS + (["source"] if include_sources else [])
     nodes = [n for n in graph.all_nodes(kinds) if n.get("status") != "pruned"]
@@ -48,33 +143,44 @@ def graph_snapshot(cognition: Any, include_sources: bool = False,
     pct = {k: v["percentile"] for k, v in scored.items()}
     colls = {c["name"]: c for c in graph.list_collections()}
     layout = getattr(cognition, "layout", None)
-    mode = layout_mode or cognition_config()["visual"].get("layout", "cluster")
+    mode = layout_mode or cognition_config()["visual"].get("layout", "graph")
+    if mode not in LAYOUTS:
+        mode = "graph"
     # Helper agents (researcher, librarian…) are plumbing, never drawn even as a topic node
     nodes = [n for n in nodes if (n.get("label") or "").strip().lower() not in _AGENT_NAMES]
-    from memory.tree_layout import core_subjects, tree_positions
-    all_edges = graph.list_edges([n["id"] for n in nodes])
-    # Main subjects = stored Peter --has_subject--> edges (memory/hierarchy.py), in layout order
-    from memory.hierarchy import SELF_ID
-    stored = {e["dst"] for e in graph.edges_of(SELF_ID) if e["relation"] == "has_subject" and e["src"] == SELF_ID}
-    core_links: List[str] = [i for i in core_subjects(nodes, all_edges) if i in stored]
+    ids = [n["id"] for n in nodes]
+    id_set = set(ids)
+    all_edges = graph.list_edges(ids)
+    # Peter's own stored edges (has_subject) to drawn subjects; Peter is the core at the origin
+    self_edges = [e for e in graph.list_edges([SELF_ID] + ids) if SELF_ID in (e["src"], e["dst"])
+                  and (e["dst"] if e["src"] == SELF_ID else e["src"]) in id_set and e["relation"] != "helper_of"]
+    stored_subjects = sorted({e["dst"] for e in self_edges if e["relation"] == "has_subject" and e["src"] == SELF_ID})
+    core_links: List[str] = stored_subjects            # only stored edges, never inferred
     if mode == "tree":
+        from memory.tree_layout import tree_positions
         tree_pos = tree_positions(nodes, all_edges)
     elif mode == "cluster":
         # 3-D: the tree hierarchy, with similar meanings placed close together
         from memory.tree_layout import cluster_positions
         semantic = {n["id"]: layout.place(n) for n in nodes} if layout is not None else {}
         tree_pos = cluster_positions(nodes, all_edges, semantic)
+    elif mode == "graph":
+        tree_pos = _graph_layout(cognition, graph, layout, nodes, ids, all_edges, self_edges)
     else:
         tree_pos = {}
 
     out_nodes: List[Dict[str, Any]] = []
+    empty = 0
     for n in nodes:
         style = _style_for(n, pct)
-        if mode in ("tree", "cluster"):
+        if mode in ("tree", "cluster", "graph"):
             pos = tree_pos.get(n["id"], (0.0, 0.0, 0.0))
         else:
             pos = layout.place(n) if layout is not None else (0.0, 0.0, 0.0)
         coll = colls.get(n.get("collection") or "")
+        count = int(coll["record_count"]) if coll else 0
+        is_empty = n["kind"] in TOPIC_KINDS and count == 0
+        empty += 1 if is_empty else 0
         out_nodes.append({
             "id": n["id"], "kind": n["kind"], "label": (n.get("label") or "")[:120],
             "status": n.get("status", "active"), "pinned": bool(n.get("pinned")),
@@ -84,22 +190,32 @@ def graph_snapshot(cognition: Any, include_sources: bool = False,
             "tier": style["tier"], "style": style,
             "position": [round(float(x), 3) for x in pos],
             "collection": n.get("collection"),
-            "record_count": int(coll["record_count"]) if coll else 0,
+            "record_count": count,
+            "empty": is_empty,              # a topic/hub whose vector store has no knowledge yet
             "confidence": round(float(n.get("confidence") if n.get("confidence") is not None else 0.5), 3),
         })
-    ids = [n["id"] for n in out_nodes]
-    edges = [{"id": e["id"], "src": e["src"], "dst": e["dst"], "relation": e["relation"]}
-             for e in graph.list_edges(ids)]
+
+    def edge_out(e: Dict[str, Any]) -> Dict[str, Any]:
+        d = e.get("data") or {}
+        w = d.get("weight") if isinstance(d, dict) else None
+        return {"id": e["id"], "src": e["src"], "dst": e["dst"], "relation": e["relation"],
+                "weight": round(float(w), 4) if w is not None else None,
+                "primary": bool(d.get("primary")) if isinstance(d, dict) else False}
+
+    edges = [edge_out(e) for e in all_edges] + [edge_out(e) for e in self_edges]
     by_kind: Dict[str, int] = {}
     for n in out_nodes:
         by_kind[n["kind"]] = by_kind.get(n["kind"], 0) + 1
+    semantic_ok = bool(getattr(cognition, "semantic_ok", True))
     return {
         "layout": mode,
-        "core_links": core_links,   # main subjects, drawn as lines from Peter's core
+        "cognition": {"semantic_ok": semantic_ok},
+        "self": {"id": SELF_ID, "position": [0.0, 0.0, 0.0]},
+        "core_links": core_links,   # main subjects: Peter's stored has_subject edges
         "nodes": out_nodes,
         "edges": edges,
         "stats": {"nodes": len(out_nodes), "edges": len(edges), "by_kind": by_kind,
-                  "collections": len(colls)},
+                  "collections": len(colls), "semantic_ok": semantic_ok, "empty_collections": empty},
     }
 
 
@@ -141,10 +257,13 @@ def node_detail(cognition: Any, node_id: str, max_records: int = 10) -> Optional
     for e in graph.edges_of(node_id):
         other_id = e["dst"] if e["src"] == node_id else e["src"]
         other = graph.get_node(other_id)
+        d = e.get("data") or {}
         edges.append({"id": e["id"], "relation": e["relation"],
                       "direction": "out" if e["src"] == node_id else "in",
                       "node_id": other_id, "label": other["label"] if other else other_id,
-                      "kind": other["kind"] if other else None})
+                      "kind": other["kind"] if other else None,
+                      "weight": d.get("weight") if isinstance(d, dict) else None,
+                      "primary": bool(d.get("primary")) if isinstance(d, dict) else False})
     curiosity = []
     if getattr(cognition, "curiosity", None) is not None:
         curiosity = [{"id": c["id"], "question": c["question"], "status": c["status"],
@@ -161,5 +280,6 @@ def node_detail(cognition: Any, node_id: str, max_records: int = 10) -> Optional
         "tier": style["tier"], "style": style,
         "confidence": round(float(node.get("confidence") if node.get("confidence") is not None else 0.5), 3),
         "collection": coll_info, "records": records, "sources": sources,
+        "empty": node["kind"] in TOPIC_KINDS and not (coll_info and coll_info["record_count"]),
         "aliases": graph.aliases_of(node_id), "edges": edges, "curiosity": curiosity,
     }

@@ -24,23 +24,42 @@ export interface GraphNode {
   position: [number, number, number];
   collection: string | null;
   record_count: number;
+  empty?: boolean;       // a topic/hub whose vector store holds no knowledge yet
   confidence: number;
 }
 
+/** Peter's own node id: drawn as the core sphere at the origin, never as a graph node. */
+export const SELF_ID = 'self_peter';
+
 export interface GraphEdge {
   id: string;
-  src: string;
+  src: string;           // may be SELF_ID (Peter's has_subject edges)
   dst: string;
   relation: string;
+  weight?: number | null;   // cosine similarity of the two nodes' vectors (null: not a vector edge)
+  primary?: boolean;        // the primary 'abstracts' parent of dst
+}
+
+/** A record-level vector link followed by recall (traverse event). */
+export interface VectorLink {
+  edge_id: string;
+  from_node: string;
+  to_node: string;
+  from_record: string;
+  to_record: string;
+  similarity: number;
 }
 
 export interface GraphSnapshot {
   view: 'graph';
-  layout?: 'tree' | 'cluster' | 'semantic';
-  core_links?: string[];   // main subjects linked straight to Peter's core
+  layout?: 'graph' | 'tree' | 'cluster' | 'semantic';
+  core_links?: string[];   // main subjects: Peter's stored has_subject edges
+  self?: { id: string; position: [number, number, number] };
+  cognition?: { semantic_ok: boolean };
   nodes: GraphNode[];
   edges: GraphEdge[];
-  stats: { nodes: number; edges: number; by_kind: Record<string, number>; collections: number };
+  stats: { nodes: number; edges: number; by_kind: Record<string, number>; collections: number;
+    semantic_ok?: boolean; empty_collections?: number };
 }
 
 export interface RecordPoint {
@@ -70,7 +89,9 @@ export interface NodeDetail {
   }>;
   sources: string[];
   aliases: string[];
-  edges: Array<{ id: string; relation: string; direction: 'in' | 'out'; node_id: string; label: string; kind: string | null }>;
+  edges: Array<{ id: string; relation: string; direction: 'in' | 'out'; node_id: string; label: string; kind: string | null;
+    weight?: number | null; primary?: boolean }>;
+  empty?: boolean;
   curiosity: Array<{ id: string; question: string; status: string; priority: number }>;
 }
 
@@ -92,5 +113,7 @@ export const RELATION_HEX: Record<string, number> = {
   curious_about: 0xffc857,
   cites:         0x5b6b8a,
   spawned_by:    0x3a4766,
+  similar_to:    0x5fe3c0,   // drawn dashed: a neighbour by meaning, not a part-of link
+  has_subject:   0x9fb8ff,   // Peter -> main subject
 };
 export const DEFAULT_EDGE_HEX = 0x3a4766;

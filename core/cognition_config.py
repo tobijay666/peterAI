@@ -19,12 +19,14 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "cognition.yam
 
 DEFAULTS: Dict[str, Any] = {
     "enabled": True,
-    "usage": {"half_life_days": 14, "baseline_importance": 0.5},
+    "usage": {"half_life_days": 14, "baseline_importance": 0.5, "rollup_factor": 0.9},
     "resolver": {"index_min_similarity": 0.55, "max_entities": 3, "use_llm": True,
                  "llm_max_tokens": 700, "link_category": True},
     "recall": {"top_k": 6, "neighbour_weight": 0.6, "max_neighbours": 3,
                "record_fallback_min": 0.45, "record_fallback_max_collections": 64,
-               "tree_walk_min": 0.4, "similar_link_min": 0.6, "similar_link_max": 3},
+               "tree_walk_min": 0.4},
+    "vectors": {"similar_add_min": 0.6, "similar_remove_below": 0.45, "similar_k": 3,
+                "record_links_k": 3, "record_link_min": 0.30, "follow_weight": 0.5, "max_follow": 6},
     "sufficiency": {"min_score": 0.30, "min_records": 2, "use_llm_judge": True},
     "research": {
         "enabled": True, "max_queries": 3, "max_pages": 4, "max_seconds": 25,
@@ -37,6 +39,8 @@ DEFAULTS: Dict[str, Any] = {
         "weights": {"usage": 0.4, "novelty": 0.3, "gap": 0.2, "recency": 0.1},
         "max_pending": 200,
     },
+    "fill": {"thin_records": 3, "member_records": 3, "max_hub_records": 40, "max_per_cycle": 3,
+             "research_in_chat": False},
     "sleep": {
         "idle_minutes": 20, "min_hours_between": 6, "max_new_collections": 5,
         "research_items_per_cycle": 3,
@@ -45,10 +49,11 @@ DEFAULTS: Dict[str, Any] = {
             "min_similarity": 0.45, "max_similarity": 0.80,
             "migrate_min_similarity": 0.40, "max_records_per_member": 8,
         },
+        "merge": {"label_similarity": 0.92, "centroid_similarity": 0.90, "max_per_cycle": 5},
         "gaps": {"min_degree": 2, "min_records": 3, "min_confidence": 0.5},
     },
     "visual": {
-        "layout": "cluster",
+        "layout": "graph",
         "tiers": {"high_percentile": 0.80, "low_percentile": 0.30},
         "high": {"scale_min": 1.6, "scale_max": 2.4, "emissive_min": 1.5, "emissive_max": 3.0,
                  "saturation": 1.0, "opacity": 1.0},
