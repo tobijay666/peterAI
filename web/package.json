@@ -1,0 +1,22 @@
+{
+  "name": "peter-ai-web",
+  "version": "0.1.0",
+  "description": "Peter AI – web console with live 3-D mind view",
+  "private": true,
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "d3": "^7.9.0",
+    "three": "^0.166.1"
+  },
+  "devDependencies": {
+    "@types/d3": "^7.4.3",
+    "@types/three": "^0.166.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0"
+  }
+}

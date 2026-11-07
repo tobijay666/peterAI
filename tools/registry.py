@@ -1,6 +1,6 @@
 """Central Tool Registry with schema auto-generation, guardrail checking, and memory auditing."""
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 from core.guardrails import GuardrailManager
 from core.interfaces import ToolResult
 from core.logger import logger

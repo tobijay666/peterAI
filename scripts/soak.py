@@ -5,6 +5,7 @@ Outputs validation/soak.md.
 """
 import sys
 from pathlib import Path
+from typing import Any, Dict
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.clock import FakeClock
@@ -58,7 +59,7 @@ def run_soak_test(days: int = 90) -> Dict[str, Any]:
 
     def get_total_records() -> int:
         total = 0
-        for ns in VectorMemory.DEFAULT_NAMESPACES:
+        for ns in vector.list_namespaces():
             total += len(vector.get_all_records(ns))
         return total
 

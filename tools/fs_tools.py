@@ -2,9 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 from core.interfaces import ToolResult
-from core.logger import logger
 
 DEFAULT_READ_ROOT = Path(os.getenv("FS_READ_ROOT", "D:\\" if os.name == "nt" else "/"))
 DEFAULT_WRITE_ROOT = Path(os.getenv("PETER_WORKSPACE", "D:\\Peter_Workspace" if os.name == "nt" else "./workspace"))

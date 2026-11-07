@@ -8,11 +8,10 @@ After all steps in a TaskPlan complete, the compiler:
 4. Fires 'task.compiled' so the REPL engine can announce completion.
 """
 
-import time
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import List, Optional
 
 from core.events import event_bus
-from core.interfaces import Message, TaskPlan, TaskStatus
+from core.interfaces import Message, TaskStatus
 from core.logger import logger
 from engine import task_store
 from llm.router import LLMRouter

@@ -53,7 +53,7 @@ class EvictionScheduler:
         max_age_sec = self.max_age_days * 86400.0
 
         total_evicted_vectors = 0
-        for ns in self.vector_store.DEFAULT_NAMESPACES:
+        for ns in self.vector_store.list_namespaces():
             records = self.vector_store.get_all_records(ns)
             evict_ids = []
             for r in records:

@@ -8,7 +8,7 @@ def test_schema_migration_fresh_db(temp_dir, fake_clock):
     
     with gm._get_connection() as conn:
         row = conn.execute("SELECT MAX(version) as v FROM schema_version").fetchone()
-        assert row["v"] == 2
+        assert row["v"] == 3  # v3: cognitive memory (usage, aliases, collections)
         
         # Verify tables exist
         tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -36,7 +36,7 @@ def test_schema_migration_idempotency(temp_dir, fake_clock):
         #    conn.execute("INSERT INTO schema_version ...")
         # Since version is 2 on second run, it won't enter the `if version < 2:` block!
         # So only 1 row should exist.
-        assert row["c"] == 1
+        assert row["c"] == 2  # one row per applied migration (v2, v3); none added on re-open
     gm2.close()
 
 def test_nodes_edges_survive_migration(temp_dir, fake_clock):
@@ -75,7 +75,7 @@ def test_nodes_edges_survive_migration(temp_dir, fake_clock):
     
     with gm._get_connection() as conn:
         row = conn.execute("SELECT MAX(version) as v FROM schema_version").fetchone()
-        assert row["v"] == 2
+        assert row["v"] == 3  # v3: cognitive memory (usage, aliases, collections)
         
         n_row = conn.execute("SELECT * FROM nodes WHERE id = 'n1'").fetchone()
         assert n_row is not None

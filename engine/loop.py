@@ -7,7 +7,6 @@ v1.2 additions:
   - TTS announcement when a background task compiles.
 """
 
-import sys
 import threading
 from typing import Optional
 
@@ -18,7 +17,7 @@ from core.guardrails import GuardrailManager
 from core.interfaces import TaskStatus
 from core.logger import logger
 from engine import task_compiler, task_store
-from engine.task_queue import TaskQueue, TaskWorkerPool
+from engine.task_queue import TaskWorkerPool
 from llm.router import LLMRouter
 from tts.service import TTSService
 
@@ -94,9 +93,6 @@ class REPLEngine:
             print(format_agent("Peter", output))
             print(f"{Colors.CYAN}{'=' * 60}{Colors.RESET}\n")
             self.tts.speak(f"Sir, background task {task_id} has completed.")
-            # Speak the actual result so Peter reads results aloud, not just the notice
-            if output and output.strip():
-                self.tts.speak(output)
 
     # ------------------------------------------------------------------
     # REPL lifecycle

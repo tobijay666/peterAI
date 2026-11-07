@@ -6,9 +6,7 @@ Status lifecycle: candidate -> active -> deprecated.
 Deprecated skills are kept for lineage, never matched.
 """
 from __future__ import annotations
-import json
 import uuid
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 import yaml
 from core.clock import Clock, SystemClock

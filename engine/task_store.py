@@ -11,7 +11,7 @@ import json
 import os
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 from core.clock import SystemClock
 
 from core.interfaces import TaskPlan, TaskStep, TaskStatus

@@ -3,6 +3,11 @@
 Cycle order (fixed, tested):
   snapshot → consolidate → promote/retire skills → decay eviction → journal
 
+With cognitive memory attached (sleep cycle v2, spec Phase 4):
+  snapshot → usage audit → consolidate → abstraction → gap scan + research
+           → promote/retire skills → prune → decay eviction → journal
+Deletion stays last, so nothing is removed before it could be consolidated.
+
 Honours EVOLUTION_MODE (from .env):
   shadow: reports what would happen, performs nothing (FR-20.1)
   active: executes all mutations
@@ -18,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from core.clock import Clock, SystemClock
-from core.events import event_bus
+from core.events import emit, event_bus
 from core.logger import logger
 
 JOURNAL_PATH = Path("data/evolution/journal.jsonl")
@@ -52,6 +57,9 @@ class EvolutionCoordinator:
         mode: Optional[str] = None,
         clock: Optional[Clock] = None,
         interval_hours: float = 24.0,
+        cognition: Any = None,
+        snapshot_manager: Any = None,
+        should_pause: Any = None,
     ) -> None:
         self.vector = vector
         self.graph = graph
@@ -63,6 +71,10 @@ class EvolutionCoordinator:
         self.mode = mode or EVOLUTION_MODE_ENV
         self._clock = clock or SystemClock()
         self.interval_hours = interval_hours
+        self.cognition = cognition
+        self.snapshot_manager = snapshot_manager
+        self.should_pause = should_pause
+        self.last_sleep_report: Optional[Dict[str, Any]] = None
         self._running = False
         self._thread: Optional[threading.Thread] = None
         JOURNAL_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -82,7 +94,7 @@ class EvolutionCoordinator:
     def stop(self) -> None:
         self._running = False
 
-    def run_cycle(self) -> Dict[str, Any]:
+    def run_cycle(self, reason: str = "timer") -> Dict[str, Any]:
         """Run one full evolution cycle. Returns a report dict."""
         if self.mode == "off":
             logger.info("EvolutionCoordinator: mode=off, skipping cycle.")
@@ -93,10 +105,18 @@ class EvolutionCoordinator:
 
         logger.info(f"EvolutionCoordinator: starting cycle (mode={self.mode})")
 
+        sleep = None
+        if self.cognition is not None:
+            from engine.sleep_cycle import SleepCycle
+            sleep = SleepCycle(self.cognition, dry_run=is_shadow, should_pause=self.should_pause)
+            report["cycle_id"] = sleep.cycle_id
+            emit("sleep_start", user_id=self.cognition.user_id, reason=reason, mode=self.mode,
+                 cycle_id=sleep.cycle_id)
+
         # Step 1: Snapshot
         try:
             from memory.snapshot import SnapshotManager
-            snap_mgr = SnapshotManager(clock=self._clock)
+            snap_mgr = self.snapshot_manager or SnapshotManager(clock=self._clock)
             if not is_shadow:
                 snap_path = snap_mgr.take_snapshot()
                 self._journal({"step": "snapshot", "path": str(snap_path)})
@@ -106,6 +126,10 @@ class EvolutionCoordinator:
         except Exception as e:
             report["errors"].append(f"snapshot: {e}")
             logger.error(f"EvolutionCoordinator: snapshot error: {e}")
+
+        # Step 1b (sleep v2): usage audit — mark low-usage, long-untouched nodes as fading
+        if sleep is not None:
+            self._sleep_step(sleep, "audit", report)
 
         # Step 2: Consolidation
         try:
@@ -133,6 +157,14 @@ class EvolutionCoordinator:
             report["errors"].append(f"consolidation: {e}")
             logger.error(f"EvolutionCoordinator: consolidation error: {e}")
 
+        # Step 2b–2c (sleep v2): cross-domain abstraction, then gap scan + background research
+        if sleep is not None:
+            self._sleep_step(sleep, "abstract", report)
+            self._sleep_step(sleep, "merge_duplicates", report)
+            self._sleep_step(sleep, "fill", report)      # empty / thin hubs: aggregate + overview research
+            self._sleep_step(sleep, "scan_gaps", report)
+            self._sleep_step(sleep, "research", report)
+
         # Step 3: Promote / retire skills
         try:
             action = self._run_skill_maintenance(is_shadow)
@@ -140,6 +172,10 @@ class EvolutionCoordinator:
         except Exception as e:
             report["errors"].append(f"skill_maintenance: {e}")
             logger.error(f"EvolutionCoordinator: skill maintenance error: {e}")
+
+        # Step 3b (sleep v2): prune nodes still fading after the grace period
+        if sleep is not None:
+            self._sleep_step(sleep, "prune", report)
 
         # Step 4: Decay eviction (after consolidation — FR-14.5)
         try:
@@ -159,8 +195,28 @@ class EvolutionCoordinator:
             report["errors"].append(f"eviction: {e}")
             logger.error(f"EvolutionCoordinator: eviction error: {e}")
 
+        if sleep is not None:
+            self._sleep_step(sleep, "maintain", report)     # repair, stale copies, counts, vectors
+            self._sleep_step(sleep, "relayout", report)
+            sr = sleep.report.to_dict()
+            report["sleep"] = sr
+            report["errors"].extend(sr["errors"])
+            self.last_sleep_report = sr
+            if not is_shadow:
+                self._journal({"step": "sleep_cycle", **{k: v for k, v in sr.items() if k != "errors"}})
+            emit("sleep_end", user_id=self.cognition.user_id, cycle_id=sleep.cycle_id, report=sr)
+
         logger.info(f"EvolutionCoordinator: cycle complete. report={report}")
         return report
+
+    def _sleep_step(self, sleep: Any, name: str, report: Dict[str, Any]) -> None:
+        if sleep.report.paused:
+            return
+        try:
+            getattr(sleep, name)()
+        except Exception as e:
+            report["errors"].append(f"sleep.{name}: {e}")
+            logger.error(f"EvolutionCoordinator: sleep step {name} failed: {e}")
 
     def _run_skill_maintenance(self, is_shadow: bool) -> Dict[str, Any]:
         """Evaluate all candidate/active skills for promotion/deprecation."""
