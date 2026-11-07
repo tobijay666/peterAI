@@ -96,15 +96,20 @@ class PeterAgent(BaseAgent):
             "memory_recall",
             "memory_store",
             "tts_speak",
+            "run_python_snippet",
+            "run_shell_command",
+            "web_search",
+            "read_file",
+            "write_file",
         ]
 
         super().__init__(
             agent_id="peter",
             name="Peter",
             system_prompt=system_prompt,
-            policy=["nvidia", "groq", "openrouter", "huggingface"],
+            policy=["ollama", "nvidia", "groq", "openrouter", "huggingface"],
             tool_names=tool_names,
-            max_steps=15,
+            max_steps=25,
             router=router,
             vector=vector,
             graph=graph,

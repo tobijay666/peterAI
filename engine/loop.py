@@ -94,6 +94,9 @@ class REPLEngine:
             print(format_agent("Peter", output))
             print(f"{Colors.CYAN}{'=' * 60}{Colors.RESET}\n")
             self.tts.speak(f"Sir, background task {task_id} has completed.")
+            # Speak the actual result so Peter reads results aloud, not just the notice
+            if output and output.strip():
+                self.tts.speak(output)
 
     # ------------------------------------------------------------------
     # REPL lifecycle

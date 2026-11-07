@@ -9,9 +9,11 @@ from llm.providers.base import BaseProvider, ProviderError
 from llm.providers.groq import GroqProvider
 from llm.providers.huggingface import HuggingFaceProvider
 from llm.providers.nvidia import NvidiaProvider
+from llm.providers.ollama import OllamaProvider
 from llm.providers.openrouter import OpenRouterProvider
 
 PROVIDER_CLASSES = {
+    "ollama": OllamaProvider,
     "nvidia": NvidiaProvider,
     "groq": GroqProvider,
     "openrouter": OpenRouterProvider,
@@ -65,6 +67,7 @@ class LLMRouter:
 
     def _init_defaults(self) -> None:
         self.providers = {
+            "ollama": OllamaProvider(),
             "nvidia": NvidiaProvider(),
             "groq": GroqProvider(),
             "openrouter": OpenRouterProvider(),

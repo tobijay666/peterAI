@@ -30,7 +30,7 @@ from llm.router import LLMRouter
 from memory.eviction import EvictionScheduler
 from memory.graph_store import GraphMemory
 from memory.vector_store import VectorMemory
-from tools import fs_tools, git_tools, memory_tools, web_tools
+from tools import fs_tools, git_tools, memory_tools, web_tools, code_tools
 from tools.memory_tools import init_memory_tools
 from tools.registry import ToolRegistry
 from tts.service import TTSService
@@ -403,6 +403,40 @@ def bootstrap_system():
                 "type": "object",
                 "properties": {"text": {"type": "string"}},
                 "required": ["text"],
+            },
+        },
+    )
+
+    # Register Code execution tools
+    registry.register(
+        "run_python_snippet",
+        code_tools.run_python_snippet,
+        {
+            "name": "run_python_snippet",
+            "description": "Executes a Python code snippet in the workspace and returns stdout/stderr. Use for calculations, data processing, and scripting tasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Python source code to execute."},
+                    "cwd": {"type": "string", "description": "Working directory (must be within workspace). Optional."},
+                },
+                "required": ["code"],
+            },
+        },
+    )
+    registry.register(
+        "run_shell_command",
+        code_tools.run_shell_command,
+        {
+            "name": "run_shell_command",
+            "description": "Runs a shell/PowerShell command in the workspace and returns output. Use for file operations, running scripts, and system tasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Shell command to execute."},
+                    "cwd": {"type": "string", "description": "Working directory (must be within workspace). Optional."},
+                },
+                "required": ["command"],
             },
         },
     )
