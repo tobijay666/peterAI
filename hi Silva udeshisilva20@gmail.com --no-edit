@@ -1,0 +1,181 @@
+[33mcommit 7f757404dfee5ec64365a1d0b039fc4359585fa0[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mvisualization[m[33m)[m
+Author: Neola Udeshi Silva <udeshisilva20@gmail.com>
+Date:   Wed Nov 4 09:30:44 2026 +0530
+
+    fixed peter not being connected, and cleaned up a bit
+
+[33mcommit fbeccbd03f1ef0a2fbb27aabbe1b12a583c3f721[m
+Author: Devmith <devmith0702@gmail.com>
+Date:   Tue Nov 3 20:19:33 2026 +0530
+
+    more on the visualiation
+
+[33mcommit 84ef69ac0642bcd20063b822e637d3420f9fe468[m
+Author: Devmith <devmith0702@gmail.com>
+Date:   Sat Oct 24 10:51:39 2026 +0530
+
+    trying things out to speed peter up and get the visualization working
+
+[33mcommit 7ffe4a39744594822be0d0fdebcc9831e695440f[m
+Author: Devmith <devmith0702@gmail.com>
+Date:   Fri Oct 23 12:13:57 2026 +0530
+
+    Cognitive memory: graph-indexed recall, research, curiosity, sleep v2, 3D mind view
+
+[33mcommit 84ff2185b5abebc9f44bd2cf0910af0811030653[m[33m ([m[1;32mudeshi[m[33m)[m
+Author: Devmith <devmith0702@gmail.com>
+Date:   Thu Oct 22 11:17:23 2026 +0000
+
+    fix: ValueError in get_all_records when ChromaDB returns numpy embedding array
+    
+    ChromaDB returns embeddings as a numpy ndarray, not a Python list.
+    The previous code used:
+        embeddings = res.get("embeddings") or []
+    NumPy raises:
+        ValueError: The truth value of an array with more than one element
+        is ambiguous. Use a.any() or a.all()
+    because `or` evaluates truthiness of the full array.
+    
+    Fix: check `is not None` explicitly instead of relying on truthiness,
+    and wrap the per-row list() conversion in try/except to handle any
+    remaining edge cases from ChromaDB version differences.
+    
+    This was crashing both the EvictionThread and the /api/mind/snapshot
+    route, causing a 500 on every visualization load.
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TQkJPafQ2mHj1QhHM6uD2S
+
+[33mcommit 91b8f954bf94606c65af228eeb213d33bd43245b[m
+Author: Devmith <devmith0702@gmail.com>
+Date:   Thu Oct 22 11:14:41 2026 +0000
+
+    debug: expose snapshot 500 error detail in response body + browser console
+    
+    - snapshot route catches all exceptions and returns {"error", "traceback"}
+      in the 500 JSON body instead of an opaque server error
+    - fetchSnapshot logs the full 500 response body to console.error so
+      the actual Python traceback is visible in browser DevTools
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TQkJPafQ2mHj1QhHM6uD2S
+
+[33mcommit b027f7499de7cdefc3a9ea91e5c9fdc634abce49[m
+Author: Devmith <devmith0702@gmail.com>
+Date:   Thu Oct 22 11:00:51 2026 +0000
+
+    debug: add console logging to mind snapshot fetch + increase point visibility
+    
+    - fetchSnapshot now logs response status and first point on success,
+      and logs errors instead of swallowing them silently
+    - buildPointCloud logs the point count on every call
+    - Demo point size 0.28→0.7 and opacity 0.38→0.75 (were nearly invisible)
+    - Real point size 0.42→0.55 and opacity unchanged at 0.95
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TQkJPafQ2mHj1QhHM6uD2S
+
+[33mcommit f0b7d23c71ba074b4ef34cce8189f57138c6ff76[m
+Author: Devmith <devmith0702@gmail.com>
+Date:   Thu Oct 22 10:52:24 2026 +0000
+
+    fix: 3D mind scene blank due to zero-height grid container at mount time
+    
+    Two root causes:
+    1. .app-grid had no grid-template-rows or explicit height, so .panel-mind
+       collapsed to 0px — root.clientHeight returned 0 when scene.ts ran and
+       the WebGL backbuffer was created at 0×500 (placeholder) then never
+       properly resized before first render.
+    
+    2. renderer.setSize() was called once at mount with clientWidth/Height that
+       could both be 0 because DOM layout hadn't completed yet.
+    
+    Fixes:
+    - styles.css: add grid-template-rows:1fr + height:100% + min-height:0 to
+      .app-grid so the centre column fills the available height; add
+      height:100% + min-height:0 to .panel-mind.
+    - scene.ts: initialise renderer at 1×1 (no-op placeholder), extract
+      onResize() helper used by both ResizeObserver and a single
+      requestAnimationFrame call right after mount so the backbuffer is
+      correctly sized on the next frame after layout completes.
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TQkJPafQ2mHj1QhHM6uD2S
+
+[33mcommit cbdcb83ba6044be129513c18dea170368ccf8ad2[m
+Author: Devmith <devmith0702@gmail.com>
+Date:   Thu Oct 22 10:45:00 2026 +0000
+
+    refactor: replace A-Frame with pure Three.js for 3D mind visualization
+    
+    A-Frame was causing silent rendering failures due to CDN global
+    registration timing races with Vite module evaluation, embedded mode
+    canvas sizing conflicts, and AFRAME.registerComponent running before
+    a-scene HTML was parsed.
+    
+    New approach: one plain canvas driven by window.THREE (r128 CDN global):
+    - No framework, no registration, no timing dependency
+    - Manual orbit controls (drag to rotate, scroll to zoom)
+    - Peter core sphere with breathe animation and glow ring
+    - Thinking ring pulses during step_start/thinking events
+    - Point cloud coloured by agent; demo points at 0.35 opacity
+    - Recall beams: white flash + line from core to recalled point (850ms)
+    - Core pulse: green on store/learned, purple on thinking, gold on skill
+    - Click any point opens inspector overlay with memory details
+    - ResizeObserver keeps canvas filling parent at all times
+    - A-Frame CDN script and AFRAME type declaration removed entirely
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TQkJPafQ2mHj1QhHM6uD2S
+
+[33mcommit d8d04e49d3e8a34e8e30eecd83e89205588070d6[m
+Author: Devmith <devmith0702@gmail.com>
+Date:   Thu Oct 22 10:38:03 2026 +0000
+
+    fix: make 3D vector DB visualization always render with real or demo data
+    
+    Root causes fixed:
+    - vector_store.get_all_records() now includes embeddings so PCA has real
+      data to project (was hardcoded to skip embeddings since Phase 2)
+    - mind_routes snapshot route now passes rec["embedding"] through instead
+      of hardcoding [] for every point
+    - _project_3d() skips demo-pre-positioned points; real points with <4
+      records or missing embeddings fall back to spherical scatter (not origin)
+    - Added _demo_seed_points(): 12 labelled placeholder points covering all
+      agents/kinds, shown at 0.35 opacity when DB is empty; replaced
+      automatically by real memories on first chat
+    - memory-cloud.ts: removed unused d3 import which caused Vite to bundle
+      a CDN global, breaking A-Frame component registration timing
+    - growth.ts: replaced D3 SVG bar chart with CSS-only namespace rows and
+      progress bar
+    - scene.ts: stats bar shows "No memories yet" when only demo points exist
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TQkJPafQ2mHj1QhHM6uD2S
+
+[33mcommit b4b8db998f302cbef87b8955652a7f0fa7a71ace[m[33m ([m[1;31morigin/Anton[m[33m)[m
+Author: tobijay666 <menakaantonjayakody@gmail.com>
+Date:   Sat Oct 10 08:42:17 2026 +0530
+
+    FEAT: Peter version 1.3 Created. the pruning mechanism online.
+
+[33mcommit 4e5063486d9aebf246d13378fa112630f6c0f00e[m[33m ([m[1;32mAnton[m[33m)[m
+Author: tobijay666 <menakaantonjayakody@gmail.com>
+Date:   Sun Oct 4 23:55:30 2026 +0530
+
+    FEAT: V1.2 is Done.
+
+[33mcommit 58ffbd5656ecca60725fe450d56b0a45de6e0b37[m
+Author: tobijay666 <menakaantonjayakody@gmail.com>
+Date:   Sat Sep 26 15:13:29 2026 +0530
+
+    FIX: LLM providers Issue fixed
+
+[33mcommit 6a5fb648abae2f2ce2982ee4b07911930dbe0192[m[33m ([m[1;31morigin/udeshi[m[33m)[m
+Author: tobijay666 <menakaantonjayakody@gmail.com>
+Date:   Wed Sep 23 16:04:30 2026 +0530
+
+    UPDATE: Readme How to work in the repo
+
+[33mcommit 11a743a68b2573d9c3e5d19ebaa6682bc3dfb6fa[m
+Aut
